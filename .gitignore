@@ -1,0 +1,167 @@
+# Build directories
+build/
+cmake-build-*/
+*build*/
+out/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# Qt generated files
+*_autogen/
+*.moc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.pro.user*
+*.qmlc
+*.jsc
+
+# C++ compiled files
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.exp
+*.pdb
+*.exe
+*.out
+*.app
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.vcxproj*
+*.sln
+*.user
+*.userosscache
+*.sou
+*.suo
+*.ncb
+*.aps
+*.plg
+*.opt
+*.clw
+*.pch
+*.pdb
+*.idb
+*.ilk
+*.meta
+*.obj
+*.pch
+*.tlog
+*.log
+*.lastbuildstate
+
+# CLion
+cmake-build-*/
+.idea/
+
+# Qt Creator
+*.pro.user*
+*.autosave
+
+# Visual Studio Code
+.vscode/
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Linux
+*~
+*.core
+
+# Windows
+*.tmp
+*.log
+*.obj
+*.o
+*.a
+*.lib
+*.so
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Package managers
+vcpkg_installed/
+conan.lock
+conanbuildinfo.*
+conandata.yml
+
+# Testing
+Testing/
+CTestTestfile.cmake
+tests/build/
+
+# Documentation
+docs/build/
+doxygen/
+
+# Backup files
+*.bak
+*.orig
+*.backup
+
+# Logs
+*.log
+logs/
+
+# Configuration files that shouldn't be tracked
+config.ini
+settings.conf
+*.local
+
+# Plugin build artifacts
+plugins/*.so
+plugins/*.dll
+plugins/*.dylib
+
+# Generated resource files
+resources/compiled/
+
+# Translation files (generated)
+*.qm
+
+# Qt linguist files that are generated
+*.ts~
+
+# Crash dumps
+*.dmp
+*.mdmp
+core.*
+
+# Performance profiling
+*.prof
+*.gprof
+callgrind.out.*
+massif.out.*
