@@ -542,10 +542,36 @@ void MainWindow::togglePlayPause()
         return;
     }
 
+    // Add debug info to understand what's happening
+    qint64 currentPosition = m_mediaController->position();
+    qint64 duration = m_mediaController->duration();
+    Media::PlaybackState currentState = m_mediaController->state();
+
+    qDebug() << "togglePlayPause: State=" << static_cast<int>(currentState)
+             << "Position=" << currentPosition
+             << "Duration=" << duration
+             << "IsFullScreen=" << m_isFullScreen;
+
     auto state = m_mediaController->state();
     if (state == Media::PlaybackState::Playing) {
         m_mediaController->pause();
     } else {
+        // FIX: If media has ended (stopped and at the end), reset to beginning
+        if (state == Media::PlaybackState::Stopped &&
+            duration > 0 && currentPosition >= duration - 1000) { // 1 second tolerance
+
+            qDebug() << "togglePlayPause: Media has ended, resetting to beginning";
+            m_mediaController->seek(0);
+
+            // Update UI sliders immediately
+            if (m_positionSlider) {
+                m_positionSlider->setValue(0);
+            }
+            if (m_fullScreenProgressSlider) {
+                m_fullScreenProgressSlider->setValue(0);
+            }
+        }
+
         m_mediaController->play();
     }
 }
@@ -1589,7 +1615,19 @@ void MainWindow::createFullScreenOverlay()
         m_isSeekingByUser = false;
         // Perform seek when user releases the slider
         if (m_mediaController && m_fullScreenProgressSlider) {
-            m_mediaController->seek(m_fullScreenProgressSlider->value());
+            qint64 seekPosition = m_fullScreenProgressSlider->value();
+            qint64 duration = m_mediaController->duration();
+
+            // FIX: If user tries to seek to the very end, and media has ended, reset to beginning
+            if (duration > 0 && seekPosition >= duration - 100 &&
+                m_mediaController->state() == Media::PlaybackState::Stopped) {
+                seekPosition = 0;
+                m_fullScreenProgressSlider->setValue(0);
+                // Also start playing automatically when seeking from end to beginning
+                m_mediaController->play();
+            } else {
+                m_mediaController->seek(seekPosition);
+            }
         }
         resetControlsHideTimer(); // Restart hide timer after seeking
     });
@@ -1682,6 +1720,7 @@ void MainWindow::createFullScreenOverlay()
     )");
 
     connect(playPauseBtn, &QPushButton::clicked, [this]() {
+        // Always use the main togglePlayPause method to ensure consistent behavior
         togglePlayPause();
         resetControlsHideTimer();
     });

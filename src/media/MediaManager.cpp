@@ -97,6 +97,13 @@ void MediaManager::togglePlayPause()
             engine.pause();
             m_positionTimer->stop();
         } else if (currentState == PlaybackState::Paused || currentState == PlaybackState::Stopped) {
+            // FIX: If media has ended (position at the end), reset to beginning
+            if (currentState == PlaybackState::Stopped &&
+                engine.position() >= engine.duration() &&
+                engine.duration() > 0) {
+                engine.setPosition(0);
+            }
+
             engine.play();
             if (!m_positionTimer->isActive()) {
                 m_positionTimer->start();

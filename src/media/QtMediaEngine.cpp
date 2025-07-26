@@ -86,6 +86,14 @@ void QtMediaEngine::play()
         return;
     }
 
+    // FIX: If media has ended (position at or near the end), reset to beginning
+    qint64 currentPos = m_player->position();
+    qint64 duration = m_player->duration();
+
+    if (duration > 0 && currentPos >= duration - 100) { // 100ms tolerance
+        m_player->setPosition(0);
+    }
+
     m_player->play();
 }
 
@@ -221,6 +229,10 @@ void QtMediaEngine::onPlayerMediaStatusChanged(QMediaPlayer::MediaStatus status)
         break;
     case QMediaPlayer::BufferingMedia:
         emit stateChanged(PlaybackState::Buffering);
+        break;
+    case QMediaPlayer::EndOfMedia:
+        // When media reaches the end, emit stopped state
+        emit stateChanged(PlaybackState::Stopped);
         break;
     case QMediaPlayer::InvalidMedia:
         m_lastError = "Invalid media format";
