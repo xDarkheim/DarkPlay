@@ -1,4 +1,4 @@
-#ifndef DARKPLAY_UI_MAINWINDOW_H
+gi#ifndef DARKPLAY_UI_MAINWINDOW_H
 #define DARKPLAY_UI_MAINWINDOW_H
 
 #include <QMainWindow>
