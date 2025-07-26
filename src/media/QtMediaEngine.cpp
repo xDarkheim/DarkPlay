@@ -400,4 +400,3 @@ float QtMediaEngine::getSystemVolumeLevel() const
 }
 } // namespace DarkPlay::Media
 
-#include "QtMediaEngine.moc"
