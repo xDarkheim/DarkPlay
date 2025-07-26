@@ -84,6 +84,9 @@ private slots:
     // Theme handling
     void onThemeChanged(const QString& themeName);
 
+    // Context menu
+    void showContextMenu(const QPoint& position);
+
 private:
     // UI setup methods
     void setupUI();

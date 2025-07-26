@@ -1383,6 +1383,16 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
             } else {
                 showFullScreenUI();
             }
+        } else if (event->button() == Qt::RightButton) {
+            // Show context menu on right click in fullscreen
+            showContextMenu(event->globalPos());
+            return;
+        }
+    } else {
+        // Handle right click in normal mode
+        if (event->button() == Qt::RightButton) {
+            showContextMenu(event->globalPos());
+            return;
         }
     }
 
@@ -1997,6 +2007,210 @@ void MainWindow::showPluginManager()
     } else {
         QMessageBox::warning(this, "Plugin Manager", "Plugin manager is not available.");
     }
+}
+
+void MainWindow::showContextMenu(const QPoint& position)
+{
+    // Create context menu
+    QMenu contextMenu(this);
+    contextMenu.setObjectName("contextMenu"); // For theming
+
+    // File operations section
+    auto* openAction = contextMenu.addAction("📁 Open File...");
+    openAction->setShortcut(QKeySequence::Open);
+    connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
+
+    // Recent files submenu
+    if (!m_recentFiles.isEmpty()) {
+        auto* recentMenu = contextMenu.addMenu("Recent Files");
+        for (const QString& file : m_recentFiles) {
+            QFileInfo fileInfo(file);
+            auto* recentAction = recentMenu->addAction(fileInfo.fileName());
+            recentAction->setData(file);
+            recentAction->setToolTip(file);
+            connect(recentAction, &QAction::triggered, this, &MainWindow::openRecentFile);
+        }
+    }
+
+    contextMenu.addSeparator();
+
+    // Playback controls section
+    if (m_mediaController && m_mediaController->hasMedia()) {
+        // Play/Pause
+        auto state = m_mediaController->state();
+        QString playPauseText = (state == Media::PlaybackState::Playing) ? "⏸ Pause" : "▶ Play";
+        auto* playPauseAction = contextMenu.addAction(playPauseText);
+        playPauseAction->setShortcut(Qt::Key_Space);
+        connect(playPauseAction, &QAction::triggered, this, &MainWindow::togglePlayPause);
+
+        // Stop
+        auto* stopAction = contextMenu.addAction("⏹ Stop");
+        connect(stopAction, &QAction::triggered, this, &MainWindow::stopPlayback);
+
+        contextMenu.addSeparator();
+
+        // Seek controls
+        auto* seekBackAction = contextMenu.addAction("⏪ Seek Back 10s");
+        seekBackAction->setShortcut(Qt::Key_Left);
+        connect(seekBackAction, &QAction::triggered, [this]() {
+            if (m_mediaController) {
+                m_mediaController->seek(m_mediaController->position() - 10000);
+            }
+        });
+
+        auto* seekForwardAction = contextMenu.addAction("⏩ Seek Forward 10s");
+        seekForwardAction->setShortcut(Qt::Key_Right);
+        connect(seekForwardAction, &QAction::triggered, [this]() {
+            if (m_mediaController) {
+                m_mediaController->seek(m_mediaController->position() + 10000);
+            }
+        });
+
+        contextMenu.addSeparator();
+    }
+
+    // Volume controls
+    auto* volumeMenu = contextMenu.addMenu("🔊 Volume");
+
+    // Volume presets
+    auto* volume25Action = volumeMenu->addAction("25%");
+    connect(volume25Action, &QAction::triggered, [this]() {
+        if (m_volumeSlider) m_volumeSlider->setValue(25);
+    });
+
+    auto* volume50Action = volumeMenu->addAction("50%");
+    connect(volume50Action, &QAction::triggered, [this]() {
+        if (m_volumeSlider) m_volumeSlider->setValue(50);
+    });
+
+    auto* volume75Action = volumeMenu->addAction("75%");
+    connect(volume75Action, &QAction::triggered, [this]() {
+        if (m_volumeSlider) m_volumeSlider->setValue(75);
+    });
+
+    auto* volume100Action = volumeMenu->addAction("100%");
+    connect(volume100Action, &QAction::triggered, [this]() {
+        if (m_volumeSlider) m_volumeSlider->setValue(100);
+    });
+
+    volumeMenu->addSeparator();
+
+    auto* muteAction = volumeMenu->addAction("🔇 Mute");
+    muteAction->setCheckable(true);
+    muteAction->setChecked(m_volumeSlider && m_volumeSlider->value() == 0);
+    connect(muteAction, &QAction::triggered, [this](bool mute) {
+        if (m_volumeSlider) {
+            static int lastVolume = 70; // Remember last volume
+            if (mute) {
+                lastVolume = m_volumeSlider->value();
+                m_volumeSlider->setValue(0);
+            } else {
+                m_volumeSlider->setValue(lastVolume > 0 ? lastVolume : 70);
+            }
+        }
+    });
+
+    // View options section
+    contextMenu.addSeparator();
+
+    auto* fullscreenAction = contextMenu.addAction(m_isFullScreen ? "🗗 Exit Fullscreen" : "🗖 Fullscreen");
+    fullscreenAction->setShortcut(Qt::Key_F11);
+    connect(fullscreenAction, &QAction::triggered, this, &MainWindow::toggleFullScreen);
+
+    // Aspect ratio submenu
+    auto* aspectMenu = contextMenu.addMenu("📐 Aspect Ratio");
+    auto* aspectGroup = new QActionGroup(this);
+
+    auto* autoAspectAction = aspectMenu->addAction("Auto");
+    autoAspectAction->setCheckable(true);
+    autoAspectAction->setChecked(true);
+    aspectGroup->addAction(autoAspectAction);
+    connect(autoAspectAction, &QAction::triggered, [this]() {
+        if (m_videoWidget) {
+            m_videoWidget->setAspectRatioMode(Qt::KeepAspectRatio);
+        }
+    });
+
+    auto* stretchAspectAction = aspectMenu->addAction("Stretch to Fill");
+    stretchAspectAction->setCheckable(true);
+    aspectGroup->addAction(stretchAspectAction);
+    connect(stretchAspectAction, &QAction::triggered, [this]() {
+        if (m_videoWidget) {
+            m_videoWidget->setAspectRatioMode(Qt::IgnoreAspectRatio);
+        }
+    });
+
+    auto* aspect43Action = aspectMenu->addAction("4:3");
+    aspect43Action->setCheckable(true);
+    aspectGroup->addAction(aspect43Action);
+    connect(aspect43Action, &QAction::triggered, [this]() {
+        if (m_videoWidget) {
+            m_videoWidget->setAspectRatioMode(Qt::KeepAspectRatioByExpanding);
+        }
+    });
+
+    auto* aspect169Action = aspectMenu->addAction("16:9");
+    aspect169Action->setCheckable(true);
+    aspectGroup->addAction(aspect169Action);
+    connect(aspect169Action, &QAction::triggered, [this]() {
+        if (m_videoWidget) {
+            m_videoWidget->setAspectRatioMode(Qt::KeepAspectRatio);
+        }
+    });
+
+    // Theme submenu
+    auto* themeMenu = contextMenu.addMenu("🎨 Theme");
+    auto* themeGroup = new QActionGroup(this);
+
+    if (m_app && m_app->themeManager()) {
+        QStringList themes = m_app->themeManager()->availableThemes();
+        QString currentTheme = m_app->themeManager()->currentTheme();
+
+        for (const QString& theme : themes) {
+            auto* themeAction = themeMenu->addAction(theme);
+            themeAction->setCheckable(true);
+            themeAction->setChecked(theme == currentTheme);
+            themeGroup->addAction(themeAction);
+
+            connect(themeAction, &QAction::triggered, [this, theme]() {
+                if (m_app && m_app->themeManager()) {
+                    m_app->themeManager()->loadTheme(theme);
+                }
+            });
+        }
+    }
+
+    // Tools section
+    contextMenu.addSeparator();
+
+    auto* preferencesAction = contextMenu.addAction("⚙️ Preferences...");
+    preferencesAction->setShortcut(QKeySequence::Preferences);
+    connect(preferencesAction, &QAction::triggered, this, &MainWindow::showPreferences);
+
+    auto* pluginManagerAction = contextMenu.addAction("🔌 Plugin Manager...");
+    connect(pluginManagerAction, &QAction::triggered, this, &MainWindow::showPluginManager);
+
+    // About section
+    contextMenu.addSeparator();
+
+    auto* aboutAction = contextMenu.addAction("ℹ️ About DarkPlay");
+    connect(aboutAction, &QAction::triggered, [this]() {
+        QMessageBox::about(this, "About DarkPlay",
+                          QString("DarkPlay Media Player v%1\n\n"
+                                 "A modern, extensible media player built with Qt 6\n"
+                                 "and modern C++ architecture.\n\n"
+                                 "Right-click for context menu\n"
+                                 "Double-click video area for fullscreen")
+                          .arg(QApplication::applicationVersion()));
+    });
+
+    // Show context menu at the requested position
+    // In fullscreen mode, show the UI controls when context menu is shown
+    if (m_isFullScreen) {
+        showFullScreenUI();
+    }
+
+    contextMenu.exec(position);
 }
 
 } // namespace DarkPlay::UI
