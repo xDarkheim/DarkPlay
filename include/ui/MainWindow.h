@@ -49,6 +49,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 private slots:
     // File operations
@@ -101,6 +102,9 @@ private:
     void addToRecentFiles(const QString& filePath);
     void setAdaptiveLayout();
     void toggleFullScreen();
+    void showFullScreenControls();
+    void hideFullScreenControls();
+    void resetControlsHideTimer();
     [[nodiscard]] static QString formatTime(qint64 milliseconds);
 
     // Core application reference
@@ -144,11 +148,14 @@ private:
     QStringList m_recentFiles;
     bool m_isSeekingByUser;
     bool m_isFullScreen;
+    bool m_controlsVisible;
     std::unique_ptr<QTimer> m_updateTimer;
+    std::unique_ptr<QTimer> m_controlsHideTimer;
 
     // Constants
     static constexpr int UPDATE_INTERVAL_MS = 100;
     static constexpr int MAX_RECENT_FILES = 10;
+    static constexpr int CONTROLS_HIDE_TIMEOUT_MS = 3000; // 3 seconds
 };
 
 } // namespace DarkPlay::UI

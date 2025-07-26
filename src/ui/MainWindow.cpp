@@ -50,7 +50,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_clearRecentAction(nullptr)
     , m_isSeekingByUser(false)
     , m_isFullScreen(false)
+    , m_controlsVisible(true)
     , m_updateTimer(std::make_unique<QTimer>(this))
+    , m_controlsHideTimer(std::make_unique<QTimer>(this))
 {
     // Check if application instance is available
     if (!m_app) {
@@ -102,6 +104,9 @@ void MainWindow::setupUI()
     m_centralWidget = new QWidget(this);
     setCentralWidget(m_centralWidget);
 
+    // Enable mouse tracking for fullscreen controls functionality
+    setMouseTracking(true);
+
     // Create main layout - owned by central widget
     m_mainLayout = new QVBoxLayout(m_centralWidget);
     m_mainLayout->setContentsMargins(10, 10, 10, 10);
@@ -118,6 +123,9 @@ void MainWindow::setupVideoWidget()
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_videoWidget->setMinimumSize(320, 240);
 
+    // Enable mouse tracking for the video widget too
+    m_videoWidget->setMouseTracking(true);
+
     // Delayed initialization to prevent startup flickering
     m_videoWidget->hide();
 
@@ -129,7 +137,8 @@ void MainWindow::setupVideoWidget()
         m_mediaController->setVideoSink(m_videoWidget->videoSink());
     }
 
-    m_mainLayout->addWidget(m_videoWidget, 1); // Give it stretch factor
+    // Add with maximum stretch factor for full screen usage
+    m_mainLayout->addWidget(m_videoWidget, 100); // Higher stretch factor
 
     // Show widget only after complete initialization
     QTimer::singleShot(100, this, [this]() {
@@ -175,15 +184,15 @@ void MainWindow::optimizeVideoWidgetRendering()
     m_videoWidget->setAttribute(Qt::WA_TranslucentBackground, false);
     m_videoWidget->setAttribute(Qt::WA_AlwaysShowToolTips, false);
 
-    // Optimize mouse and focus event handling
-    m_videoWidget->setMouseTracking(false);
+    // Keep mouse tracking enabled for fullscreen controls
+    // m_videoWidget->setMouseTracking(false); // Removed this line
     m_videoWidget->setFocusPolicy(Qt::NoFocus);
 
     // Force update and size
     m_videoWidget->setUpdatesEnabled(true);
     m_videoWidget->setVisible(true);
 
-    // Set a fixed size policy for stability
+    // Set expanding size policy for maximum video area utilization
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     // Force apply changes
@@ -440,6 +449,10 @@ void MainWindow::connectSignals()
 
     // Update timer
     connect(m_updateTimer.get(), &QTimer::timeout, this, &MainWindow::updateTimeLabels);
+
+    // Controls hide timer for fullscreen mode
+    m_controlsHideTimer->setSingleShot(true);
+    connect(m_controlsHideTimer.get(), &QTimer::timeout, this, &MainWindow::hideFullScreenControls);
 
     // Application signals
     if (m_app) {
@@ -833,16 +846,21 @@ void MainWindow::toggleFullScreen()
         // Exit fullscreen mode
         showNormal();
 
-        // Show controls and menu bar
+        // Stop the hide timer
+        m_controlsHideTimer->stop();
+
+        // Show all UI elements
         if (m_controlsWidget) {
             m_controlsWidget->show();
+            m_controlsVisible = true;
         }
         menuBar()->show();
         statusBar()->show();
 
-        // Restore normal margins
+        // Restore normal margins and spacing
         if (m_mainLayout) {
             m_mainLayout->setContentsMargins(10, 10, 10, 10);
+            m_mainLayout->setSpacing(10);
         }
 
         m_isFullScreen = false;
@@ -851,20 +869,77 @@ void MainWindow::toggleFullScreen()
         // Enter fullscreen mode
         showFullScreen();
 
-        // Hide controls, menu bar and status bar for true fullscreen experience
-        if (m_controlsWidget) {
-            m_controlsWidget->hide();
-        }
+        // Hide menu bar and status bar immediately
         menuBar()->hide();
         statusBar()->hide();
 
-        // Remove margins for maximum video area
+        // Remove all margins and spacing for maximum video area
         if (m_mainLayout) {
             m_mainLayout->setContentsMargins(0, 0, 0, 0);
+            m_mainLayout->setSpacing(0);
         }
+
+        // Initially show controls in fullscreen, then start hide timer
+        if (m_controlsWidget) {
+            m_controlsWidget->show();
+            m_controlsVisible = true;
+        }
+
+        // Start the auto-hide timer
+        resetControlsHideTimer();
 
         m_isFullScreen = true;
     }
+}
+
+void MainWindow::mouseMoveEvent(QMouseEvent *event)
+{
+    // In fullscreen mode, show controls when mouse moves
+    if (m_isFullScreen) {
+        showFullScreenControls();
+    }
+
+    QMainWindow::mouseMoveEvent(event);
+}
+
+void MainWindow::showFullScreenControls()
+{
+    if (!m_isFullScreen) {
+        return;
+    }
+
+    // Show controls if they're hidden
+    if (!m_controlsVisible && m_controlsWidget) {
+        m_controlsWidget->show();
+        m_controlsVisible = true;
+    }
+
+    // Reset the hide timer
+    resetControlsHideTimer();
+}
+
+void MainWindow::hideFullScreenControls()
+{
+    if (!m_isFullScreen) {
+        return;
+    }
+
+    // Hide controls
+    if (m_controlsVisible && m_controlsWidget) {
+        m_controlsWidget->hide();
+        m_controlsVisible = false;
+    }
+}
+
+void MainWindow::resetControlsHideTimer()
+{
+    if (!m_isFullScreen) {
+        return;
+    }
+
+    // Stop current timer and start new one
+    m_controlsHideTimer->stop();
+    m_controlsHideTimer->start(CONTROLS_HIDE_TIMEOUT_MS);
 }
 
 void MainWindow::showPreferences()
