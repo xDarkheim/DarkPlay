@@ -88,6 +88,9 @@ private:
     void setupStatusBar();
     void connectSignals();
 
+    // Video widget optimization methods
+    void optimizeVideoWidgetRendering();
+
     // Settings management
     void loadSettings();
     void saveSettings();

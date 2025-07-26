@@ -116,12 +116,77 @@ void MainWindow::setupVideoWidget()
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_videoWidget->setMinimumSize(320, 240);
 
+    // Отложенная инициализация для предотвращения мерцания при запуске
+    m_videoWidget->hide();
+
+    // Apply comprehensive visual optimization
+    optimizeVideoWidgetRendering();
+
     // Set up video output through media controller
     if (m_mediaController) {
         m_mediaController->setVideoSink(m_videoWidget->videoSink());
     }
 
     m_mainLayout->addWidget(m_videoWidget, 1); // Give it stretch factor
+
+    // Показываем виджет только после полной инициализации
+    QTimer::singleShot(100, this, [this]() {
+        if (m_videoWidget) {
+            m_videoWidget->show();
+        }
+    });
+}
+
+void MainWindow::optimizeVideoWidgetRendering()
+{
+    if (!m_videoWidget) {
+        return;
+    }
+
+    // Основные атрибуты для предотвращения мерцания
+    m_videoWidget->setAttribute(Qt::WA_OpaquePaintEvent, true);
+    m_videoWidget->setAttribute(Qt::WA_NoSystemBackground, true);
+    m_videoWidget->setAttribute(Qt::WA_PaintOnScreen, false);
+    m_videoWidget->setAttribute(Qt::WA_DontCreateNativeAncestors, true);
+    m_videoWidget->setAttribute(Qt::WA_NativeWindow, false);
+
+    // Критически важные настройки для устранения лагов
+    m_videoWidget->setAttribute(Qt::WA_DeleteOnClose, false);
+    m_videoWidget->setAttribute(Qt::WA_NoChildEventsForParent, true);
+    m_videoWidget->setAttribute(Qt::WA_DontShowOnScreen, false);
+
+    // Отключаем автоматическую заливку фона
+    m_videoWidget->setAutoFillBackground(false);
+
+    // Устанавливаем стабильный черный фон и убираем границы
+    m_videoWidget->setStyleSheet(
+        "QVideoWidget { "
+        "background-color: #000000; "
+        "border: none; "
+        "margin: 0px; "
+        "padding: 0px; "
+        "}"
+    );
+
+    // Дополнительные атрибуты стабильности
+    m_videoWidget->setAttribute(Qt::WA_StaticContents, true);
+    m_videoWidget->setAttribute(Qt::WA_TranslucentBackground, false);
+    m_videoWidget->setAttribute(Qt::WA_AlwaysShowToolTips, false);
+
+    // Оптимизация событий мыши и фокуса
+    m_videoWidget->setMouseTracking(false);
+    m_videoWidget->setFocusPolicy(Qt::NoFocus);
+
+    // Принудительное обновление и размер
+    m_videoWidget->setUpdatesEnabled(true);
+    m_videoWidget->setVisible(true);
+
+    // Устанавливаем фиксированную политику размера для стабильности
+    m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    // Принудительно применяем изменения
+    m_videoWidget->update();
+    m_videoWidget->repaint();
 }
 
 void MainWindow::setupMediaControls()
