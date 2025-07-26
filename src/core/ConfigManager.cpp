@@ -79,27 +79,27 @@ bool ConfigManager::setValue(const QString& key, const QVariant& value) noexcept
         }
 
         const QVariant oldValue = m_settings->value(key);
-        if (oldValue != value) {
-            m_settings->setValue(key, value);
-            
-            // Emit signals outside the lock to prevent deadlocks
-            locker.unlock();
-            
-            emit configChanged(key, value);
 
-            // Emit section changed signal
-            const QString section = key.split('/').first();
-            if (!section.isEmpty()) {
-                emit sectionChanged(section);
+        // Use strong exception safety - only commit if operation succeeds
+        m_settings->setValue(key, value);
+
+        // Ensure write is successful before emitting signal
+        if (m_settings->status() == QSettings::NoError) {
+            // Only emit if value actually changed
+            if (oldValue != value) {
+                emit configChanged(key, value);
             }
+            return true;
+        } else {
+            emitError(QString("Failed to write key '%1': Settings error").arg(key));
+            return false;
         }
-        return true;
-        
+
     } catch (const std::exception& e) {
-        emitError(QString("Error setting key '%1': %2").arg(key, e.what()));
+        emitError(QString("Exception writing key '%1': %2").arg(key, e.what()));
         return false;
     } catch (...) {
-        emitError(QString("Unknown error setting key '%1'").arg(key));
+        emitError(QString("Unknown exception writing key '%1'").arg(key));
         return false;
     }
 }
@@ -286,35 +286,54 @@ bool ConfigManager::setSection(const QString& section, const QJsonObject& data) 
             return false;
         }
 
-        m_settings->beginGroup(section);
-
-        // Clear existing keys in section
-        const QStringList existingKeys = m_settings->childKeys();
-        for (const QString& key : existingKeys) {
-            m_settings->remove(key);
-        }
-
-        // Set new values with validation
-        const QVariantMap variantData = jsonToVariantMap(data);
-        for (auto it = variantData.begin(); it != variantData.end(); ++it) {
-            if (validateValue(it.key(), it.value())) {
-                m_settings->setValue(it.key(), it.value());
+        // Use RAII for group management
+        class GroupGuard {
+        public:
+            GroupGuard(QSettings* settings, const QString& group)
+                : m_settings(settings), m_hasGroup(!group.isEmpty()) {
+                if (m_hasGroup) {
+                    m_settings->beginGroup(group);
+                }
             }
+
+            ~GroupGuard() {
+                if (m_hasGroup && m_settings) {
+                    m_settings->endGroup();
+                }
+            }
+
+        private:
+            QSettings* m_settings;
+            bool m_hasGroup;
+        };
+
+        // Convert JSON to variant map for atomic operation
+        const QVariantMap variantMap = jsonToVariantMap(data);
+
+        // Ensure atomic write operation
+        GroupGuard guard(m_settings.get(), section);
+
+        // Clear existing keys in section first
+        m_settings->remove("");
+
+        // Write all new values
+        for (auto it = variantMap.constBegin(); it != variantMap.constEnd(); ++it) {
+            m_settings->setValue(it.key(), it.value());
         }
 
-        m_settings->endGroup();
-        
-        // Emit signal outside the lock
-        locker.unlock();
-        emit sectionChanged(section);
-        
-        return true;
-        
+        if (m_settings->status() == QSettings::NoError) {
+            emit sectionChanged(section);
+            return true;
+        } else {
+            emitError(QString("Failed to write section '%1'").arg(section));
+            return false;
+        }
+
     } catch (const std::exception& e) {
-        emitError(QString("Error setting section '%1': %2").arg(section, e.what()));
+        emitError(QString("Exception writing section '%1': %2").arg(section, e.what()));
         return false;
     } catch (...) {
-        emitError(QString("Unknown error setting section '%1'").arg(section));
+        emitError(QString("Unknown exception writing section '%1'").arg(section));
         return false;
     }
 }
@@ -339,10 +358,10 @@ bool ConfigManager::sync() noexcept
         return true;
         
     } catch (const std::exception& e) {
-        emitError(QString("Error syncing settings: %1").arg(e.what()));
+        emitError(QString("Exception during sync: %1").arg(e.what()));
         return false;
     } catch (...) {
-        emitError("Unknown error syncing settings");
+        emitError("Unknown exception during sync");
         return false;
     }
 }

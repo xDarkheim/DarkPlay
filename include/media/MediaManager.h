@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <memory>
+#include <mutex>
 #include "IMediaEngine.h"
 
 namespace DarkPlay::Media {
@@ -80,42 +81,59 @@ public:
     void setRepeatMode(bool enabled);
     [[nodiscard]] bool repeatMode() const;
 
-public slots:
-    void onPositionTimer();
+    // Thread-safe engine access
+    [[nodiscard]] bool hasEngine() const noexcept;
 
 signals:
+    void mediaLoaded(const QString& url);
     void stateChanged(PlaybackState state);
     void positionChanged(qint64 position);
     void durationChanged(qint64 duration);
     void volumeChanged(int volume);
     void mutedChanged(bool muted);
     void playbackRateChanged(qreal rate);
-    void mediaLoaded(const QString& url);
-    void error(const QString& errorString);
-    void bufferingProgress(int progress);
+    void mediaInfoChanged();
+    void errorOccurred(const QString& error);
     void playlistChanged();
     void currentIndexChanged(int index);
 
 private slots:
+    void onPositionTimer();
     void onEngineStateChanged(PlaybackState state);
     void onEnginePositionChanged(qint64 position);
     void onEngineDurationChanged(qint64 duration);
-    void onEngineError(const QString& error);
+    void onEngineVolumeChanged(int volume);
+    void onEngineMutedChanged(bool muted);
+    void onEnginePlaybackRateChanged(qreal rate);
+    void onEngineMediaInfoChanged();
+    void onEngineErrorOccurred(const QString& error);
 
 private:
     void connectEngineSignals();
     void disconnectEngineSignals();
+    void validatePlaylistIndex();
     void loadCurrentMedia();
     [[nodiscard]] bool isValidIndex(int index) const;
 
+    // Thread-safe engine operations
+    template<typename Func>
+    auto safeEngineCall(Func&& func) const -> decltype(func(std::declval<IMediaEngine&>()));
+
+    template<typename Func>
+    bool safeEngineCallVoid(Func&& func) const;
+
     std::unique_ptr<IMediaEngine> m_engine;
+    mutable std::recursive_mutex m_engineMutex; // Protect engine access
+
     QStringList m_playlist;
     int m_currentIndex;
+    QString m_currentUrl;
     bool m_autoPlay;
     bool m_repeatMode;
     int m_previousVolume;
+
     QTimer* m_positionTimer;
-    QString m_currentUrl;
+    mutable std::mutex m_playlistMutex; // Protect playlist operations
 };
 
 } // namespace DarkPlay::Media

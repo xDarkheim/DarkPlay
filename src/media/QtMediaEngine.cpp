@@ -51,7 +51,7 @@ bool QtMediaEngine::loadMedia(const QUrl& url)
 {
     if (!url.isValid()) {
         m_lastError = "Invalid URL provided";
-        emit error(m_lastError);
+        emit errorOccurred(m_lastError);
         return false;
     }
 
@@ -82,7 +82,7 @@ void QtMediaEngine::play()
 {
     if (m_player->source().isEmpty()) {
         m_lastError = "No media loaded";
-        emit error(m_lastError);
+        emit errorOccurred(m_lastError);
         return;
     }
 
@@ -224,7 +224,7 @@ void QtMediaEngine::onPlayerMediaStatusChanged(QMediaPlayer::MediaStatus status)
         break;
     case QMediaPlayer::InvalidMedia:
         m_lastError = "Invalid media format";
-        emit error(m_lastError);
+        emit errorOccurred(m_lastError);
         break;
     default:
         break;
@@ -244,7 +244,7 @@ void QtMediaEngine::onPlayerErrorOccurred(QMediaPlayer::Error error, const QStri
     }
 
     m_lastError = errorString.isEmpty() ? "Unknown media error" : errorString;
-    emit this->error(m_lastError);
+    emit errorOccurred(m_lastError);
 }
 
 void QtMediaEngine::onPlayerPositionChanged(qint64 position)

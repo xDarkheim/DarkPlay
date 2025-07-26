@@ -95,6 +95,7 @@ private:
 
     // Video widget optimization methods
     void optimizeVideoWidgetRendering();
+    void connectVideoOutput();
 
     // Settings management
     void loadSettings();
@@ -119,39 +120,40 @@ private:
     // Core application reference
     Core::Application* m_app;
 
-    // Media controller
+    // Media controller - критический компонент, используем умный указатель
     std::unique_ptr<Controllers::MediaController> m_mediaController;
 
-    // UI Components - managed by Qt parent-child system
+    // UI Components - используем Qt parent-child систему для автоматической очистки
     QWidget* m_centralWidget;
     QVBoxLayout* m_mainLayout;
     QVideoWidget* m_videoWidget;
-
-    // Controls
     QWidget* m_controlsWidget;
+
+    // Layout components managed by Qt
     QVBoxLayout* m_controlsMainLayout;
     QHBoxLayout* m_controlsLayout;
     QHBoxLayout* m_progressLayout;
     QHBoxLayout* m_controlButtonsLayout;
 
-    // Control elements
+    // Control widgets
     QPushButton* m_playPauseButton;
     QPushButton* m_previousButton;
     QPushButton* m_nextButton;
     QPushButton* m_openFileButton;
 
-    ClickableSlider* m_positionSlider;
+    // Custom slider - используем умный указатель для безопасности
+    std::unique_ptr<ClickableSlider> m_positionSlider;
+
+    // Labels and controls
     QLabel* m_currentTimeLabel;
     QLabel* m_totalTimeLabel;
-
     QSlider* m_volumeSlider;
     QLabel* m_volumeLabel;
-
     QProgressBar* m_loadingProgressBar;
 
-    // Menu components
-    QMenu* m_recentFilesMenu;
-    QAction* m_clearRecentAction;
+    // Menu components with proper lifetime management
+    QPointer<QMenu> m_recentFilesMenu;
+    QPointer<QAction> m_clearRecentAction;
 
     // State management
     QStringList m_recentFiles;

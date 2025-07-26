@@ -1,5 +1,6 @@
 #include "media/MediaManager.h"
 #include <QDebug>
+#include <mutex>
 
 namespace DarkPlay::Media {
 
@@ -19,6 +20,8 @@ MediaManager::~MediaManager() = default;
 
 void MediaManager::setMediaEngine(std::unique_ptr<IMediaEngine> engine)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_engineMutex);
+
     if (m_engine) {
         disconnectEngineSignals();
         m_engine->stop();
@@ -33,30 +36,35 @@ void MediaManager::setMediaEngine(std::unique_ptr<IMediaEngine> engine)
 
 IMediaEngine* MediaManager::mediaEngine() const
 {
+    std::lock_guard<std::recursive_mutex> lock(m_engineMutex);
     return m_engine.get();
+}
+
+bool MediaManager::hasEngine() const noexcept
+{
+    std::lock_guard<std::recursive_mutex> lock(m_engineMutex);
+    return m_engine != nullptr;
 }
 
 bool MediaManager::loadMedia(const QUrl& url)
 {
-    if (!m_engine) {
-        qWarning() << "No media engine available";
-        return false;
-    }
+    return safeEngineCall([&](IMediaEngine& engine) -> bool {
+        m_currentUrl = url.toString();
+        bool success = engine.loadMedia(url);
 
-    m_currentUrl = url.toString();
-    bool success = m_engine->loadMedia(url);
+        if (success) {
+            emit mediaLoaded(m_currentUrl);
+        }
 
-    if (success) {
-        emit mediaLoaded(m_currentUrl);
-    }
-
-    return success;
+        return success;
+    });
 }
 
 void MediaManager::play()
 {
-    if (m_engine) {
-        m_engine->play();
+    if (safeEngineCallVoid([](IMediaEngine& engine) {
+        engine.play();
+    })) {
         if (!m_positionTimer->isActive()) {
             m_positionTimer->start();
         }
@@ -65,56 +73,66 @@ void MediaManager::play()
 
 void MediaManager::pause()
 {
-    if (m_engine) {
-        m_engine->pause();
+    if (safeEngineCallVoid([](IMediaEngine& engine) {
+        engine.pause();
+    })) {
         m_positionTimer->stop();
     }
 }
 
 void MediaManager::stop()
 {
-    if (m_engine) {
-        m_engine->stop();
+    if (safeEngineCallVoid([](IMediaEngine& engine) {
+        engine.stop();
+    })) {
         m_positionTimer->stop();
     }
 }
 
 void MediaManager::togglePlayPause()
 {
-    if (!m_engine) return;
-
-    PlaybackState currentState = m_engine->state();
-    if (currentState == PlaybackState::Playing) {
-        pause();
-    } else if (currentState == PlaybackState::Paused || currentState == PlaybackState::Stopped) {
-        play();
-    }
+    safeEngineCallVoid([this](IMediaEngine& engine) {
+        PlaybackState currentState = engine.state();
+        if (currentState == PlaybackState::Playing) {
+            engine.pause();
+            m_positionTimer->stop();
+        } else if (currentState == PlaybackState::Paused || currentState == PlaybackState::Stopped) {
+            engine.play();
+            if (!m_positionTimer->isActive()) {
+                m_positionTimer->start();
+            }
+        }
+    });
 }
 
 qint64 MediaManager::position() const
 {
-    return m_engine ? m_engine->position() : 0;
+    return safeEngineCall([](const IMediaEngine& engine) -> qint64 {
+        return engine.position();
+    });
 }
 
 qint64 MediaManager::duration() const
 {
-    return m_engine ? m_engine->duration() : 0;
+    return safeEngineCall([](const IMediaEngine& engine) -> qint64 {
+        return engine.duration();
+    });
 }
 
 void MediaManager::setPosition(qint64 position)
 {
-    if (m_engine) {
-        m_engine->setPosition(position);
-    }
+    safeEngineCallVoid([position](IMediaEngine& engine) {
+        engine.setPosition(position);
+    });
 }
 
 void MediaManager::seek(qint64 offset)
 {
-    if (m_engine) {
-        qint64 newPosition = position() + offset;
-        newPosition = qMax(0LL, qMin(newPosition, duration()));
-        setPosition(newPosition);
-    }
+    safeEngineCallVoid([this, offset](IMediaEngine& engine) {
+        qint64 newPosition = engine.position() + offset;
+        newPosition = qMax(0LL, qMin(newPosition, engine.duration()));
+        engine.setPosition(newPosition);
+    });
 }
 
 void MediaManager::seekForward(qint64 seconds)
@@ -129,18 +147,20 @@ void MediaManager::seekBackward(qint64 seconds)
 
 int MediaManager::volume() const
 {
-    return m_engine ? m_engine->volume() : 50;
+    return safeEngineCall([](const IMediaEngine& engine) -> int {
+        return engine.volume();
+    });
 }
 
 void MediaManager::setVolume(int volume)
 {
-    if (m_engine) {
-        volume = qBound(0, volume, 100);
-        m_engine->setVolume(volume);
-        if (volume > 0) {
-            m_previousVolume = volume;
+    safeEngineCallVoid([this, volume](IMediaEngine& engine) {
+        int clampedVolume = qBound(0, volume, 100);
+        engine.setVolume(clampedVolume);
+        if (clampedVolume > 0) {
+            m_previousVolume = clampedVolume;
         }
-    }
+    });
 }
 
 void MediaManager::increaseVolume(int step)
@@ -155,44 +175,48 @@ void MediaManager::decreaseVolume(int step)
 
 bool MediaManager::isMuted() const
 {
-    return m_engine ? m_engine->isMuted() : false;
+    return safeEngineCall([](const IMediaEngine& engine) -> bool {
+        return engine.isMuted();
+    });
 }
 
 void MediaManager::setMuted(bool muted)
 {
-    if (m_engine) {
-        m_engine->setMuted(muted);
-    }
+    safeEngineCallVoid([muted](IMediaEngine& engine) {
+        engine.setMuted(muted);
+    });
 }
 
 void MediaManager::toggleMute()
 {
-    if (!m_engine) return;
-
-    if (isMuted()) {
-        setMuted(false);
-        if (volume() == 0 && m_previousVolume > 0) {
-            setVolume(m_previousVolume);
+    safeEngineCallVoid([this](IMediaEngine& engine) {
+        if (engine.isMuted()) {
+            engine.setMuted(false);
+            if (engine.volume() == 0 && m_previousVolume > 0) {
+                engine.setVolume(m_previousVolume);
+            }
+        } else {
+            if (engine.volume() > 0) {
+                m_previousVolume = engine.volume();
+            }
+            engine.setMuted(true);
         }
-    } else {
-        if (volume() > 0) {
-            m_previousVolume = volume();
-        }
-        setMuted(true);
-    }
+    });
 }
 
 qreal MediaManager::playbackRate() const
 {
-    return m_engine ? m_engine->playbackRate() : 1.0;
+    return safeEngineCall([](const IMediaEngine& engine) -> qreal {
+        return engine.playbackRate();
+    });
 }
 
 void MediaManager::setPlaybackRate(qreal rate)
 {
-    if (m_engine) {
-        rate = qBound(0.25, rate, 4.0); // Limit playback rate
-        m_engine->setPlaybackRate(rate);
-    }
+    safeEngineCallVoid([rate](IMediaEngine& engine) {
+        qreal clampedRate = qBound(0.25, rate, 4.0); // Limit playback rate
+        engine.setPlaybackRate(clampedRate);
+    });
 }
 
 void MediaManager::increaseSpeed()
@@ -216,17 +240,23 @@ void MediaManager::resetSpeed()
 
 PlaybackState MediaManager::state() const
 {
-    return m_engine ? m_engine->state() : PlaybackState::Stopped;
+    return safeEngineCall([](const IMediaEngine& engine) -> PlaybackState {
+        return engine.state();
+    });
 }
 
 MediaType MediaManager::mediaType() const
 {
-    return m_engine ? m_engine->mediaType() : MediaType::Unknown;
+    return safeEngineCall([](const IMediaEngine& engine) -> MediaType {
+        return engine.mediaType();
+    });
 }
 
 QString MediaManager::errorString() const
 {
-    return m_engine ? m_engine->errorString() : QString();
+    return safeEngineCall([](const IMediaEngine& engine) -> QString {
+        return engine.errorString();
+    });
 }
 
 QString MediaManager::currentMediaUrl() const
@@ -236,26 +266,35 @@ QString MediaManager::currentMediaUrl() const
 
 QString MediaManager::title() const
 {
-    return m_engine ? m_engine->title() : QString();
+    return safeEngineCall([](const IMediaEngine& engine) -> QString {
+        return engine.title();
+    });
 }
 
 QSize MediaManager::videoSize() const
 {
-    return m_engine ? m_engine->videoSize() : QSize();
+    return safeEngineCall([](const IMediaEngine& engine) -> QSize {
+        return engine.videoSize();
+    });
 }
 
 bool MediaManager::hasVideo() const
 {
-    return m_engine ? m_engine->hasVideo() : false;
+    return safeEngineCall([](const IMediaEngine& engine) -> bool {
+        return engine.hasVideo();
+    });
 }
 
 bool MediaManager::hasAudio() const
 {
-    return m_engine ? m_engine->hasAudio() : false;
+    return safeEngineCall([](const IMediaEngine& engine) -> bool {
+        return engine.hasAudio();
+    });
 }
 
 void MediaManager::setPlaylist(const QStringList& urls)
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     m_playlist = urls;
     m_currentIndex = urls.isEmpty() ? -1 : 0;
     emit playlistChanged();
@@ -268,16 +307,19 @@ void MediaManager::setPlaylist(const QStringList& urls)
 
 QStringList MediaManager::playlist() const
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     return m_playlist;
 }
 
 int MediaManager::currentIndex() const
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     return m_currentIndex;
 }
 
 void MediaManager::setCurrentIndex(int index)
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     if (isValidIndex(index) && index != m_currentIndex) {
         m_currentIndex = index;
         emit currentIndexChanged(m_currentIndex);
@@ -287,6 +329,7 @@ void MediaManager::setCurrentIndex(int index)
 
 void MediaManager::next()
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     if (hasNext()) {
         setCurrentIndex(m_currentIndex + 1);
     } else if (m_repeatMode && !m_playlist.isEmpty()) {
@@ -296,6 +339,7 @@ void MediaManager::next()
 
 void MediaManager::previous()
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     if (hasPrevious()) {
         setCurrentIndex(m_currentIndex - 1);
     } else if (m_repeatMode && !m_playlist.isEmpty()) {
@@ -305,11 +349,13 @@ void MediaManager::previous()
 
 bool MediaManager::hasNext() const
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     return m_currentIndex < m_playlist.size() - 1;
 }
 
 bool MediaManager::hasPrevious() const
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     return m_currentIndex > 0;
 }
 
@@ -335,9 +381,11 @@ bool MediaManager::repeatMode() const
 
 void MediaManager::onPositionTimer()
 {
-    if (m_engine && m_engine->state() == PlaybackState::Playing) {
-        emit positionChanged(m_engine->position());
-    }
+    safeEngineCallVoid([this](const IMediaEngine& engine) {
+        if (engine.state() == PlaybackState::Playing) {
+            emit positionChanged(engine.position());
+        }
+    });
 }
 
 void MediaManager::onEngineStateChanged(PlaybackState state)
@@ -346,6 +394,7 @@ void MediaManager::onEngineStateChanged(PlaybackState state)
 
     // Handle automatic playlist advancement
     if (state == PlaybackState::Stopped && m_autoPlay) {
+        std::lock_guard<std::mutex> lock(m_playlistMutex);
         if (hasNext()) {
             next();
             play();
@@ -366,10 +415,30 @@ void MediaManager::onEngineDurationChanged(qint64 duration)
     emit durationChanged(duration);
 }
 
-void MediaManager::onEngineError(const QString& error)
+void MediaManager::onEngineVolumeChanged(int volume)
+{
+    emit volumeChanged(volume);
+}
+
+void MediaManager::onEngineMutedChanged(bool muted)
+{
+    emit mutedChanged(muted);
+}
+
+void MediaManager::onEnginePlaybackRateChanged(qreal rate)
+{
+    emit playbackRateChanged(rate);
+}
+
+void MediaManager::onEngineMediaInfoChanged()
+{
+    emit mediaInfoChanged();
+}
+
+void MediaManager::onEngineErrorOccurred(const QString& error)
 {
     qWarning() << "Media engine error:" << error;
-    emit this->error(error);
+    emit errorOccurred(error);
 
     // Try to continue with next media if auto-play is enabled
     if (m_autoPlay && hasNext()) {
@@ -388,28 +457,26 @@ void MediaManager::connectEngineSignals()
     connect(m_engine.get(), &IMediaEngine::durationChanged,
             this, &MediaManager::onEngineDurationChanged);
     connect(m_engine.get(), &IMediaEngine::volumeChanged,
-            this, &MediaManager::volumeChanged);
+            this, &MediaManager::onEngineVolumeChanged);
     connect(m_engine.get(), &IMediaEngine::mutedChanged,
-            this, &MediaManager::mutedChanged);
+            this, &MediaManager::onEngineMutedChanged);
     connect(m_engine.get(), &IMediaEngine::playbackRateChanged,
-            this, &MediaManager::playbackRateChanged);
-    connect(m_engine.get(), &IMediaEngine::mediaLoaded,
-            this, [this]() { emit mediaLoaded(m_currentUrl); });
-    connect(m_engine.get(), &IMediaEngine::error,
-            this, &MediaManager::onEngineError);
-    connect(m_engine.get(), &IMediaEngine::bufferingProgress,
-            this, &MediaManager::bufferingProgress);
+            this, &MediaManager::onEnginePlaybackRateChanged);
+    connect(m_engine.get(), &IMediaEngine::mediaInfoChanged,
+            this, &MediaManager::onEngineMediaInfoChanged);
+    connect(m_engine.get(), &IMediaEngine::errorOccurred,
+            this, &MediaManager::onEngineErrorOccurred);
 }
 
 void MediaManager::disconnectEngineSignals()
 {
     if (!m_engine) return;
-
     m_engine->disconnect(this);
 }
 
 void MediaManager::loadCurrentMedia()
 {
+    std::lock_guard<std::mutex> lock(m_playlistMutex);
     if (isValidIndex(m_currentIndex)) {
         const QString& url = m_playlist.at(m_currentIndex);
         loadMedia(QUrl(url));
@@ -419,6 +486,56 @@ void MediaManager::loadCurrentMedia()
 bool MediaManager::isValidIndex(int index) const
 {
     return index >= 0 && index < m_playlist.size();
+}
+
+// Template implementations
+template<typename Func>
+auto MediaManager::safeEngineCall(Func&& func) const -> decltype(func(std::declval<IMediaEngine&>()))
+{
+    std::lock_guard<std::recursive_mutex> lock(m_engineMutex);
+
+    using ReturnType = decltype(func(std::declval<IMediaEngine&>()));
+
+    if (!m_engine) {
+        if constexpr (std::is_same_v<ReturnType, bool>) {
+            return false;
+        } else if constexpr (std::is_arithmetic_v<ReturnType>) {
+            return ReturnType{0};
+        } else {
+            return ReturnType{};
+        }
+    }
+
+    try {
+        return func(*m_engine);
+    } catch (const std::exception& e) {
+        qWarning() << "Engine operation failed:" << e.what();
+        if constexpr (std::is_same_v<ReturnType, bool>) {
+            return false;
+        } else if constexpr (std::is_arithmetic_v<ReturnType>) {
+            return ReturnType{0};
+        } else {
+            return ReturnType{};
+        }
+    }
+}
+
+template<typename Func>
+bool MediaManager::safeEngineCallVoid(Func&& func) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_engineMutex);
+
+    if (!m_engine) {
+        return false;
+    }
+
+    try {
+        func(*m_engine);
+        return true;
+    } catch (const std::exception& e) {
+        qWarning() << "Engine operation failed:" << e.what();
+        return false;
+    }
 }
 
 } // namespace DarkPlay::Media

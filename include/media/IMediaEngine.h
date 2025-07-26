@@ -69,7 +69,8 @@ signals:
     void mutedChanged(bool muted);
     void playbackRateChanged(qreal rate);
     void mediaLoaded();
-    void error(const QString& errorString);
+    void mediaInfoChanged(); // Добавляем недостающий сигнал
+    void errorOccurred(const QString& errorString); // Переименовываем error в errorOccurred
     void bufferingProgress(int progress);
 };
 

@@ -250,7 +250,7 @@ void MediaController::setupConnections()
             this, &MediaController::onManagerPlaybackRateChanged);
     connect(m_mediaManager.get(), &Media::MediaManager::mediaLoaded,
             this, &MediaController::onManagerMediaLoaded);
-    connect(m_mediaManager.get(), &Media::MediaManager::error,
+    connect(m_mediaManager.get(), &Media::MediaManager::errorOccurred,
             this, &MediaController::onManagerError);
 }
 
