@@ -169,20 +169,85 @@ void MainWindow::setupMediaControls()
     // Create progress layout
     m_progressLayout = new QHBoxLayout();
 
-    // Time labels and position slider
+    // Time labels and position slider with modern styling
     m_currentTimeLabel = new QLabel("00:00", this);
     m_currentTimeLabel->setMinimumWidth(50);
     m_currentTimeLabel->setAlignment(Qt::AlignCenter);
+    m_currentTimeLabel->setStyleSheet(R"(
+        QLabel {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 4px 8px;
+            font-weight: bold;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    )");
 
     // Create position slider with unique_ptr for safety
     m_positionSlider = std::make_unique<ClickableSlider>(Qt::Horizontal, this);
     m_positionSlider->setMinimum(0);
     m_positionSlider->setMaximum(0);
     m_positionSlider->setValue(0);
+    m_positionSlider->setStyleSheet(R"(
+        QSlider::groove:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #3a3a3a, stop:1 #2a2a2a);
+            height: 10px;
+            border-radius: 5px;
+            border: 1px solid #555555;
+        }
+        QSlider::handle:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0078d4, stop:1 #005a9e);
+            border: 3px solid #ffffff;
+            width: 24px;
+            height: 24px;
+            margin: -8px 0;
+            border-radius: 12px;
+            box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.3);
+        }
+        QSlider::handle:horizontal:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #1084e0, stop:1 #0066aa);
+            transform: scale(1.2);
+            box-shadow: 0px 3px 8px rgba(0, 120, 212, 0.4);
+        }
+        QSlider::handle:horizontal:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #006cc1, stop:1 #004e8c);
+            transform: scale(1.1);
+        }
+        QSlider::sub-page:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0078d4, stop:1 #005a9e);
+            border-radius: 5px;
+            box-shadow: inset 0px 1px 3px rgba(0, 120, 212, 0.3);
+        }
+        QSlider::add-page:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #3a3a3a, stop:1 #2a2a2a);
+            border-radius: 5px;
+        }
+    )");
 
     m_totalTimeLabel = new QLabel("00:00", this);
     m_totalTimeLabel->setMinimumWidth(50);
     m_totalTimeLabel->setAlignment(Qt::AlignCenter);
+    m_totalTimeLabel->setStyleSheet(R"(
+        QLabel {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 4px 8px;
+            font-weight: bold;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    )");
 
     // Add to progress layout
     m_progressLayout->addWidget(m_currentTimeLabel);
@@ -193,24 +258,167 @@ void MainWindow::setupMediaControls()
     m_controlButtonsLayout = new QHBoxLayout();
 
     // Create control buttons
-    m_openFileButton = new QPushButton("Open", this);
+    m_openFileButton = new QPushButton("📁 Open", this);
     m_previousButton = new QPushButton("⏮", this);
     m_playPauseButton = new QPushButton("▶", this);
     m_nextButton = new QPushButton("⏭", this);
 
-    // Style buttons
-    const QStringList buttons = {m_previousButton->text(), m_playPauseButton->text(), m_nextButton->text()};
-    for (auto* button : {m_previousButton, m_playPauseButton, m_nextButton}) {
-        button->setFixedSize(40, 40);
-        button->setStyleSheet("QPushButton { font-size: 16px; }");
-    }
+    // Modern button styling with enhanced design
+    QString mediaButtonStyle = R"(
+        QPushButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #4a4a4a, stop:1 #2d2d2d);
+            border: 2px solid #555555;
+            border-radius: 25px;
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 50px;
+            min-height: 50px;
+            padding: 0px;
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #5a5a5a, stop:1 #3d3d3d);
+            border: 2px solid #0078d4;
+            transform: scale(1.05);
+        }
+        QPushButton:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #3a3a3a, stop:1 #1d1d1d);
+            border: 2px solid #005a9e;
+            transform: scale(0.95);
+        }
+        QPushButton:disabled {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #3a3a3a, stop:1 #1d1d1d);
+            border: 2px solid #333333;
+            color: #666666;
+        }
+    )";
 
-    // Volume controls
+    // Special styling for play/pause button (larger and with accent color)
+    QString playPauseButtonStyle = R"(
+        QPushButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0078d4, stop:1 #005a9e);
+            border: 2px solid #0078d4;
+            border-radius: 30px;
+            color: #ffffff;
+            font-size: 22px;
+            font-weight: bold;
+            min-width: 60px;
+            min-height: 60px;
+            padding: 0px;
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #1084e0, stop:1 #0066aa);
+            border: 2px solid #1084e0;
+            transform: scale(1.1);
+        }
+        QPushButton:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #006cc1, stop:1 #004e8c);
+            border: 2px solid #006cc1;
+            transform: scale(0.95);
+        }
+        QPushButton:disabled {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #555555, stop:1 #333333);
+            border: 2px solid #444444;
+            color: #888888;
+        }
+    )";
+
+    // Open file button styling
+    QString openButtonStyle = R"(
+        QPushButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #4a4a4a, stop:1 #2d2d2d);
+            border: 2px solid #555555;
+            border-radius: 20px;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: bold;
+            min-width: 80px;
+            min-height: 40px;
+            padding: 8px 16px;
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #5a5a5a, stop:1 #3d3d3d);
+            border: 2px solid #0078d4;
+        }
+        QPushButton:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #3a3a3a, stop:1 #1d1d1d);
+            border: 2px solid #005a9e;
+        }
+    )";
+
+    // Apply styles to buttons
+    m_openFileButton->setStyleSheet(openButtonStyle);
+    m_previousButton->setStyleSheet(mediaButtonStyle);
+    m_playPauseButton->setStyleSheet(playPauseButtonStyle);
+    m_nextButton->setStyleSheet(mediaButtonStyle);
+
+    // Set fixed sizes for consistency
+    m_previousButton->setFixedSize(50, 50);
+    m_playPauseButton->setFixedSize(60, 60);
+    m_nextButton->setFixedSize(50, 50);
+    m_openFileButton->setFixedHeight(40);
+
+    // Volume controls with modern styling
     m_volumeLabel = new QLabel("🔊", this);
+    m_volumeLabel->setStyleSheet(R"(
+        QLabel {
+            color: #ffffff;
+            font-size: 18px;
+            padding: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            min-width: 30px;
+            min-height: 30px;
+        }
+    )");
+
     m_volumeSlider = new QSlider(Qt::Horizontal, this);
     m_volumeSlider->setRange(0, 100);
     m_volumeSlider->setValue(70);
-    m_volumeSlider->setMaximumWidth(100);
+    m_volumeSlider->setMaximumWidth(120);
+    m_volumeSlider->setStyleSheet(R"(
+        QSlider::groove:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #3a3a3a, stop:1 #2a2a2a);
+            height: 8px;
+            border-radius: 4px;
+            border: 1px solid #555555;
+        }
+        QSlider::handle:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0078d4, stop:1 #005a9e);
+            border: 2px solid #ffffff;
+            width: 20px;
+            height: 20px;
+            margin: -8px 0;
+            border-radius: 10px;
+        }
+        QSlider::handle:horizontal:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #1084e0, stop:1 #0066aa);
+            transform: scale(1.1);
+        }
+        QSlider::handle:horizontal:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #006cc1, stop:1 #004e8c);
+        }
+        QSlider::sub-page:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0078d4, stop:1 #005a9e);
+            border-radius: 4px;
+        }
+    )");
 
     // Loading progress bar
     m_loadingProgressBar = new QProgressBar(this);
