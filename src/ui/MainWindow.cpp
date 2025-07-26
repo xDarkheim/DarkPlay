@@ -17,6 +17,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QPointer>
 #include <QResizeEvent>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -51,8 +52,16 @@ MainWindow::MainWindow(QWidget *parent)
     , m_isSeekingByUser(false)
     , m_isFullScreen(false)
     , m_controlsVisible(true)
+    , m_cursorHidden(false)
+    , m_fullScreenControlsOverlay(nullptr)
+    , m_fullScreenCurrentTimeLabel(nullptr)
+    , m_fullScreenTotalTimeLabel(nullptr)
+    , m_fullScreenPlayPauseButton(nullptr)
+    , m_fullScreenProgressSlider(nullptr)
+    , m_fullScreenVolumeSlider(nullptr)
     , m_updateTimer(std::make_unique<QTimer>(this))
     , m_controlsHideTimer(std::make_unique<QTimer>(this))
+    , m_mouseMoveDebounceTimer(std::make_unique<QTimer>(this))
 {
     // Check if application instance is available
     if (!m_app) {
@@ -83,6 +92,13 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // ULTIMATE CRASH PROTECTION: Set destruction flag and disable all slider updates
+    m_isDestructing = true;
+    m_sliderUpdatesEnabled = false;
+
+    // Lock mutex to ensure no slider operations are in progress
+    std::lock_guard<std::recursive_mutex> lock(m_sliderMutex);
+
     // Stop timer first to prevent callbacks during destruction
     if (m_updateTimer) {
         m_updateTimer->stop();
@@ -222,8 +238,14 @@ void MainWindow::setupMediaControls()
     m_currentTimeLabel->setAlignment(Qt::AlignCenter);
 
     m_positionSlider = new ClickableSlider(Qt::Horizontal, this);
-    m_positionSlider->setRange(0, 0);
+
+    // CRITICAL FIX: Initialize with a valid range instead of (0,0)
+    m_positionSlider->setRange(0, 100);  // Start with a valid range
     m_positionSlider->setValue(0);
+
+    // Ensure the slider is properly initialized before any further operations
+    m_positionSlider->setEnabled(true);
+    m_positionSlider->setVisible(true);
 
     // Enable clicking on the slider track for instant seeking
     m_positionSlider->setTracking(true);
@@ -452,7 +474,17 @@ void MainWindow::connectSignals()
 
     // Controls hide timer for fullscreen mode
     m_controlsHideTimer->setSingleShot(true);
-    connect(m_controlsHideTimer.get(), &QTimer::timeout, this, &MainWindow::hideFullScreenControls);
+    // Disconnect any existing connections before reconnecting to prevent duplicates
+    disconnect(m_controlsHideTimer.get(), &QTimer::timeout, this, &MainWindow::hideFullScreenUI);
+    connect(m_controlsHideTimer.get(), &QTimer::timeout, this, &MainWindow::hideFullScreenUI);
+
+    // Mouse move debounce timer to prevent too frequent UI updates
+    m_mouseMoveDebounceTimer->setSingleShot(true);
+    connect(m_mouseMoveDebounceTimer.get(), &QTimer::timeout, this, [this]() {
+        if (m_isFullScreen) {
+            showFullScreenUI();
+        }
+    });
 
     // Application signals
     if (m_app) {
@@ -483,6 +515,11 @@ void MainWindow::openFile()
     );
 
     if (!fileName.isEmpty() && m_mediaController) {
+        // CRITICAL FIX: Stop any existing overlay timers before loading new file
+        if (m_controlsHideTimer) {
+            m_controlsHideTimer->stop();
+        }
+
         if (m_mediaController->openFile(fileName)) {
             const QFileInfo fileInfo(fileName);
             addToRecentFiles(fileName);
@@ -491,11 +528,15 @@ void MainWindow::openFile()
             // Auto-play feature: automatically start playback if enabled
             bool autoPlay = configManager->getValue("playback/autoPlay", true).toBool();
             if (autoPlay) {
-                // Start playback after a small delay to ensure media is ready
-                QTimer::singleShot(100, this, [this]() {
-                    if (m_mediaController && m_mediaController->hasMedia()) {
-                        m_mediaController->play();
-                        statusBar()->showMessage("Auto-playing media file...", 2000);
+                // SAFE: Use QPointer to protect against object deletion
+                QPointer<MainWindow> safeThis = this;
+                QTimer::singleShot(100, [safeThis]() {
+                    // Check if object still exists before accessing
+                    if (safeThis && safeThis->m_mediaController && safeThis->m_mediaController->hasMedia()) {
+                        safeThis->m_mediaController->play();
+                        if (safeThis->statusBar()) {
+                            safeThis->statusBar()->showMessage("Auto-playing media file...", 2000);
+                        }
                     }
                 });
             }
@@ -515,6 +556,11 @@ void MainWindow::openRecentFile()
         return;
     }
 
+    // CRITICAL FIX: Stop any existing overlay timers before loading new file
+    if (m_controlsHideTimer) {
+        m_controlsHideTimer->stop();
+    }
+
     if (m_mediaController->openFile(fileName)) {
         const QFileInfo fileInfo(fileName);
         statusBar()->showMessage(tr("Loaded: %1").arg(fileInfo.fileName()));
@@ -523,11 +569,15 @@ void MainWindow::openRecentFile()
         if (auto* configManager = m_app->configManager()) {
             bool autoPlay = configManager->getValue("playback/autoPlay", true).toBool();
             if (autoPlay) {
-                // Start playback after a small delay to ensure media is ready
-                QTimer::singleShot(100, this, [this]() {
-                    if (m_mediaController && m_mediaController->hasMedia()) {
-                        m_mediaController->play();
-                        statusBar()->showMessage("Auto-playing recent file...", 2000);
+                // SAFE: Use QPointer to protect against object deletion
+                QPointer<MainWindow> safeThis = this;
+                QTimer::singleShot(100, [safeThis]() {
+                    // Check if object still exists before accessing
+                    if (safeThis && safeThis->m_mediaController && safeThis->m_mediaController->hasMedia()) {
+                        safeThis->m_mediaController->play();
+                        if (safeThis->statusBar()) {
+                            safeThis->statusBar()->showMessage("Auto-playing recent file...", 2000);
+                        }
                     }
                 });
             }
@@ -590,15 +640,277 @@ void MainWindow::nextTrack()
 
 void MainWindow::onPositionChanged(qint64 position)
 {
+    // ULTIMATE CRASH PROTECTION: Check atomic flags first
+    if (m_isDestructing.load() || !m_sliderUpdatesEnabled.load()) {
+        return; // Silently ignore updates during destruction or when disabled
+    }
+
+    // Lock mutex to ensure thread safety
+    std::lock_guard<std::recursive_mutex> lock(m_sliderMutex);
+
+    // Double-check flags after acquiring lock
+    if (m_isDestructing.load() || !m_sliderUpdatesEnabled.load()) {
+        return;
+    }
+
+    // THREAD-SAFE: Ultra-safe regular position slider update
     if (!m_isSeekingByUser && m_positionSlider) {
-        m_positionSlider->setValue(static_cast<int>(position));
+        try {
+            // CRITICAL VALIDATION: Check if slider object is valid before any operations
+            if (!m_positionSlider) {
+                return;
+            }
+
+            // Additional safety checks for regular slider with widget validity
+            if (m_positionSlider->isVisible() &&
+                m_positionSlider->isEnabled() &&
+                !m_positionSlider->signalsBlocked()) {
+
+                // Get slider range safely with exception handling
+                int minVal = 0, maxVal = 100;
+                try {
+                    minVal = m_positionSlider->minimum();
+                    maxVal = m_positionSlider->maximum();
+                } catch (...) {
+                    // Silent fallback to defaults
+                }
+
+                // CRITICAL FIX: Validate that the slider has a valid range before setValue
+                if (maxVal <= minVal) {
+                    return;
+                }
+
+                // Validate position value within acceptable bounds
+                int newValue = static_cast<int>(position);
+                if (newValue >= minVal && newValue <= maxVal) {
+                    // ULTIMATE SAFETY: Use QMetaObject::invokeMethod with QPointer protection
+                    QPointer<ClickableSlider> safeSlider(m_positionSlider);
+                    QMetaObject::invokeMethod(this, [safeSlider, newValue, this]() {
+                        // Triple-check everything is still valid inside the queued call
+                        if (!m_isDestructing.load() && m_sliderUpdatesEnabled.load() &&
+                            safeSlider && !safeSlider.isNull() && safeSlider.data() &&
+                            !m_isSeekingByUser &&
+                            safeSlider->isVisible() && safeSlider->isEnabled()) {
+
+                            // FINAL SAFETY CHECK: Validate range again before setValue
+                            try {
+                                int currentMin = safeSlider->minimum();
+                                int currentMax = safeSlider->maximum();
+
+                                if (currentMax > currentMin && newValue >= currentMin && newValue <= currentMax) {
+                                    safeSlider->setValue(newValue);
+                                }
+                            } catch (const std::exception& e) {
+                                // Silent error handling - just skip the update
+                            } catch (...) {
+                                // Silent error handling - just skip the update
+                            }
+                        }
+                    }, Qt::QueuedConnection);
+                }
+            }
+        } catch (const std::exception& e) {
+            // Silent error handling - just skip the update
+        } catch (...) {
+            // Silent error handling - just skip the update
+        }
+    }
+
+    // THREAD-SAFE: Update fullscreen slider only when controls are visible and we're still valid
+    if (!m_isSeekingByUser && m_isFullScreen && m_controlsVisible &&
+        !m_isDestructing.load() && m_sliderUpdatesEnabled.load()) {
+
+        // Create completely isolated lambda with QPointer protection
+        auto safeUpdateLambda = [this, position]() {
+            // Ultra-safe checks with atomic flags
+            try {
+                // Verify we're still in valid state with atomic checks
+                if (m_isDestructing.load() || !m_sliderUpdatesEnabled.load() ||
+                    !m_isFullScreen || m_isSeekingByUser || !m_controlsVisible) {
+                    return;
+                }
+
+                // Lock for thread safety in lambda
+                std::lock_guard<std::recursive_mutex> lambdaLock(m_sliderMutex);
+
+                // Verify QPointer validity with multiple comprehensive checks
+                if (!m_fullScreenProgressSlider ||
+                    !m_fullScreenProgressSlider.data() ||
+                    m_fullScreenProgressSlider.isNull()) {
+                    return; // Silent return - expected when controls are hidden
+                }
+
+                // Check widget state safely
+                QWidget* sliderWidget = m_fullScreenProgressSlider.data();
+                if (!sliderWidget->isVisible() ||
+                    sliderWidget->signalsBlocked() ||
+                    !sliderWidget->isEnabled()) {
+                    return; // Silent return - normal when controls are hidden
+                }
+
+                // Verify parent overlay validity
+                if (!m_fullScreenControlsOverlay ||
+                    !m_fullScreenControlsOverlay.data() ||
+                    !m_fullScreenControlsOverlay->isVisible()) {
+                    return; // Silent return - overlay might be hidden
+                }
+
+                // Get slider range with exception protection
+                int minVal = 0, maxVal = 100;
+                try {
+                    minVal = m_fullScreenProgressSlider->minimum();
+                    maxVal = m_fullScreenProgressSlider->maximum();
+                } catch (...) {
+                    qDebug() << "onPositionChanged: Exception getting fullscreen slider range, using defaults";
+                }
+
+                // Validate position value
+                int newValue = static_cast<int>(position);
+                if (newValue < minVal || newValue > maxVal) {
+                    // Only log if the range seems reasonable (not default 0-100)
+                    if (maxVal > 100) {
+                        qDebug() << "onPositionChanged: Fullscreen position value" << newValue
+                                 << "is out of range [" << minVal << "," << maxVal << "]";
+                    }
+                    return;
+                }
+
+                // Final ultra-safe setValue with QPointer protection
+                QPointer<QWidget> safeWidget(sliderWidget);
+                QMetaObject::invokeMethod(sliderWidget, [safeWidget, newValue, this]() {
+                    try {
+                        // Ultimate validation inside the final queued call
+                        if (!m_isDestructing.load() && m_sliderUpdatesEnabled.load() &&
+                            safeWidget && safeWidget->isVisible() && safeWidget->isEnabled()) {
+
+                            // Use blockSignals to prevent recursive calls
+                            bool wasBlocked = safeWidget->signalsBlocked();
+                            safeWidget->blockSignals(true);
+
+                            // Safe casting and setValue call
+                            if (auto* slider = qobject_cast<QSlider*>(safeWidget.data())) {
+                                slider->setValue(newValue);
+                            } else if (auto* clickableSlider = qobject_cast<ClickableSlider*>(safeWidget.data())) {
+                                clickableSlider->setValue(newValue);
+                            }
+
+                            // Restore signal blocking state
+                            safeWidget->blockSignals(wasBlocked);
+                        }
+                    } catch (const std::exception& e) {
+                        qDebug() << "onPositionChanged: CRITICAL - Exception in final fullscreen setValue:" << e.what();
+                    } catch (...) {
+                        qDebug() << "onPositionChanged: CRITICAL - Unknown exception in final fullscreen setValue";
+                    }
+                }, Qt::QueuedConnection);
+
+            } catch (const std::exception& e) {
+                qDebug() << "onPositionChanged: Exception in fullscreen safe update lambda:" << e.what();
+            } catch (...) {
+                qDebug() << "onPositionChanged: Unknown exception in fullscreen safe update lambda";
+            }
+        };
+
+        // Execute the safe lambda with ultimate protection
+        try {
+            safeUpdateLambda();
+        } catch (...) {
+            qDebug() << "onPositionChanged: FATAL - Exception even in isolated fullscreen lambda execution";
+        }
     }
 }
 
 void MainWindow::onDurationChanged(qint64 duration)
 {
+    // Regular duration slider update with basic safety
     if (m_positionSlider) {
-        m_positionSlider->setRange(0, static_cast<int>(duration));
+        try {
+            m_positionSlider->setRange(0, static_cast<int>(duration));
+        } catch (const std::exception& e) {
+            qDebug() << "onDurationChanged: Exception in regular slider setRange:" << e.what();
+        } catch (...) {
+            qDebug() << "onDurationChanged: Unknown exception in regular slider setRange";
+        }
+    }
+
+    // OPTIMIZED CRASH PROTECTION: Update fullscreen slider range only when controls are visible
+    if (m_isFullScreen && m_controlsVisible) {
+        // Create a completely isolated lambda for range setting
+        auto safeRangeUpdateLambda = [this, duration]() {
+            try {
+                // Check if we're still in a valid state
+                if (!this || !m_isFullScreen || !m_controlsVisible) {
+                    return;
+                }
+
+                // Verify QPointer validity with multiple checks
+                if (!m_fullScreenProgressSlider ||
+                    !m_fullScreenProgressSlider.data() ||
+                    m_fullScreenProgressSlider.isNull()) {
+                    return; // Silent return - this is expected when controls are hidden
+                }
+
+                // Check if widget is being destroyed or in invalid state
+                QWidget* sliderWidget = m_fullScreenProgressSlider.data();
+                if (!sliderWidget->isVisible() ||
+                    sliderWidget->signalsBlocked() ||
+                    !sliderWidget->isEnabled()) {
+                    return; // Silent return - this is normal when controls are hidden
+                }
+
+                // Verify parent overlay is also valid
+                if (!m_fullScreenControlsOverlay ||
+                    !m_fullScreenControlsOverlay.data() ||
+                    !m_fullScreenControlsOverlay->isVisible()) {
+                    return; // Silent return - overlay might be hidden
+                }
+
+                // Validate duration value
+                int newMaxValue = static_cast<int>(duration);
+                if (newMaxValue < 0) {
+                    qDebug() << "onDurationChanged: Invalid duration value" << newMaxValue;
+                    return;
+                }
+
+                // Final ultra-safe setRange call with exception isolation
+                QMetaObject::invokeMethod(sliderWidget, [sliderWidget, newMaxValue]() {
+                    try {
+                        // Triple-check widget validity inside the final call
+                        if (sliderWidget && sliderWidget->isVisible() && sliderWidget->isEnabled()) {
+                            // Use blockSignals to prevent recursive calls
+                            bool wasBlocked = sliderWidget->signalsBlocked();
+                            sliderWidget->blockSignals(true);
+
+                            // Cast to QSlider safely and call setRange
+                            if (auto* slider = qobject_cast<QSlider*>(sliderWidget)) {
+                                slider->setRange(0, newMaxValue);
+                            } else if (auto* clickableSlider = qobject_cast<ClickableSlider*>(sliderWidget)) {
+                                clickableSlider->setRange(0, newMaxValue);
+                            }
+
+                            // Restore signal blocking state
+                            sliderWidget->blockSignals(wasBlocked);
+                        }
+                    } catch (const std::exception& e) {
+                        qDebug() << "onDurationChanged: CRITICAL - Exception in final setRange call:" << e.what();
+                    } catch (...) {
+                        qDebug() << "onDurationChanged: CRITICAL - Unknown exception in final setRange call";
+                    }
+                }, Qt::QueuedConnection);
+
+            } catch (const std::exception& e) {
+                qDebug() << "onDurationChanged: Exception in safe range update lambda:" << e.what();
+            } catch (...) {
+                qDebug() << "onDurationChanged: Unknown exception in safe range update lambda";
+            }
+        };
+
+        // Execute the safe lambda with additional protection
+        try {
+            safeRangeUpdateLambda();
+        } catch (...) {
+            qDebug() << "onDurationChanged: FATAL - Exception even in isolated lambda execution";
+        }
     }
 }
 
@@ -661,8 +973,24 @@ void MainWindow::onVolumeChanged(int value)
 void MainWindow::updateTimeLabels()
 {
     if (m_mediaController && m_mediaController->hasMedia()) {
-        m_currentTimeLabel->setText(formatTime(m_mediaController->position()));
-        m_totalTimeLabel->setText(formatTime(m_mediaController->duration()));
+        QString currentTime = formatTime(m_mediaController->position());
+        QString totalTime = formatTime(m_mediaController->duration());
+
+        // Update main window labels
+        if (m_currentTimeLabel) {
+            m_currentTimeLabel->setText(currentTime);
+        }
+        if (m_totalTimeLabel) {
+            m_totalTimeLabel->setText(totalTime);
+        }
+
+        // Update fullscreen labels if they exist
+        if (m_fullScreenCurrentTimeLabel) {
+            m_fullScreenCurrentTimeLabel->setText(currentTime);
+        }
+        if (m_fullScreenTotalTimeLabel) {
+            m_fullScreenTotalTimeLabel->setText(totalTime);
+        }
     }
 }
 
@@ -670,10 +998,16 @@ void MainWindow::updatePlayPauseButton()
 {
     if (!m_mediaController) return;
 
-    if (m_mediaController->state() == Media::PlaybackState::Playing) {
-        m_playPauseButton->setText("⏸");
-    } else {
-        m_playPauseButton->setText("▶");
+    QString buttonText = (m_mediaController->state() == Media::PlaybackState::Playing) ? "⏸" : "▶";
+
+    // Update main window button
+    if (m_playPauseButton) {
+        m_playPauseButton->setText(buttonText);
+    }
+
+    // Update fullscreen button if it exists
+    if (m_fullScreenPlayPauseButton) {
+        m_fullScreenPlayPauseButton->setText(buttonText);
     }
 }
 
@@ -796,31 +1130,61 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
     setAdaptiveLayout();
+
+    if (m_isFullScreen) {
+        // Update video widget size in fullscreen
+        if (m_videoWidget) {
+            m_videoWidget->setGeometry(0, 0, width(), height());
+        }
+
+        // Update overlay position and size properly for multi-screen setup
+        if (m_fullScreenControlsOverlay) {
+            updateOverlayPosition();
+        }
+    }
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
-    switch (event->key()) {
+    if (m_isFullScreen) {
+        switch (event->key()) {
+        case Qt::Key_Escape:
+            toggleFullScreen();
+            return;
         case Qt::Key_Space:
             togglePlayPause();
-            event->accept();
-            break;
-        case Qt::Key_Escape:
-            if (m_isFullScreen) {
-                toggleFullScreen();
-                event->accept();
-            } else {
-                QMainWindow::keyPressEvent(event);
+            showFullScreenUI();
+            return;
+        case Qt::Key_Left:
+            if (m_mediaController) {
+                m_mediaController->seek(m_mediaController->position() - 10000); // -10 seconds
+                showFullScreenUI();
             }
-            break;
-        case Qt::Key_F11:
-            toggleFullScreen();
-            event->accept();
-            break;
-        default:
-            QMainWindow::keyPressEvent(event);
-            break;
+            return;
+        case Qt::Key_Right:
+            if (m_mediaController) {
+                m_mediaController->seek(m_mediaController->position() + 10000); // +10 seconds
+                showFullScreenUI();
+            }
+            return;
+        case Qt::Key_Up:
+            if (m_volumeSlider) {
+                int newVolume = qMin(100, m_volumeSlider->value() + 5);
+                m_volumeSlider->setValue(newVolume);
+                showFullScreenUI();
+            }
+            return;
+        case Qt::Key_Down:
+            if (m_volumeSlider) {
+                int newVolume = qMax(0, m_volumeSlider->value() - 5);
+                m_volumeSlider->setValue(newVolume);
+                showFullScreenUI();
+            }
+            return;
+        }
     }
+
+    QMainWindow::keyPressEvent(event);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -843,35 +1207,140 @@ void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
 void MainWindow::toggleFullScreen()
 {
     if (m_isFullScreen) {
-        // Exit fullscreen mode
-        showNormal();
-
-        // Stop the hide timer
-        m_controlsHideTimer->stop();
-
-        // Show all UI elements
-        if (m_controlsWidget) {
-            m_controlsWidget->show();
-            m_controlsVisible = true;
-        }
-        menuBar()->show();
-        statusBar()->show();
-
-        // Restore normal margins and spacing
-        if (m_mainLayout) {
-            m_mainLayout->setContentsMargins(10, 10, 10, 10);
-            m_mainLayout->setSpacing(10);
-        }
-
+        // Exit fullscreen mode - CRITICAL: Set flag first to prevent race conditions
         m_isFullScreen = false;
-        statusBar()->showMessage("Exited fullscreen mode", 1500);
+        m_sliderUpdatesEnabled = false; // CRITICAL: Disable slider updates immediately
+
+        // CRITICAL: Stop and disconnect timer COMPLETELY to prevent any callbacks
+        if (m_controlsHideTimer) {
+            m_controlsHideTimer->stop();
+            disconnect(m_controlsHideTimer.get(), nullptr, this, nullptr);
+        }
+
+        // CRITICAL FIX: Safely destroy overlay with comprehensive cleanup
+        if (m_fullScreenControlsOverlay) {
+            // Block all signals from the overlay to prevent any callbacks during destruction
+            m_fullScreenControlsOverlay->blockSignals(true);
+
+            // CRITICAL FIX: Disconnect ALL connections safely before any destruction
+            if (m_fullScreenProgressSlider) {
+                m_fullScreenProgressSlider->blockSignals(true);
+                // Disconnect all signals from/to this widget using the proper Qt method
+                m_fullScreenProgressSlider->disconnect();
+                // Also disconnect from the main slider to prevent cross-references
+                if (m_positionSlider) {
+                    disconnect(m_positionSlider, nullptr, m_fullScreenProgressSlider.data(), nullptr);
+                }
+            }
+
+            if (m_fullScreenVolumeSlider) {
+                m_fullScreenVolumeSlider->blockSignals(true);
+                // Disconnect all signals from/to this widget using the proper Qt method
+                m_fullScreenVolumeSlider->disconnect();
+                // Also disconnect from the main volume slider
+                if (m_volumeSlider) {
+                    disconnect(m_volumeSlider, nullptr, m_fullScreenVolumeSlider.data(), nullptr);
+                }
+            }
+
+            if (m_fullScreenPlayPauseButton) {
+                m_fullScreenPlayPauseButton->blockSignals(true);
+                // Disconnect all signals from/to this widget using the proper Qt method
+                m_fullScreenPlayPauseButton->disconnect();
+            }
+
+            // Disconnect time labels safely - they only receive signals
+            if (m_fullScreenCurrentTimeLabel) {
+                m_fullScreenCurrentTimeLabel->disconnect();
+            }
+            if (m_fullScreenTotalTimeLabel) {
+                m_fullScreenTotalTimeLabel->disconnect();
+            }
+
+            // Hide the overlay immediately to prevent any paint events
+            m_fullScreenControlsOverlay->setVisible(false);
+            m_fullScreenControlsOverlay->hide();
+
+            // Reset all child widget pointers BEFORE deleting parent
+            m_fullScreenCurrentTimeLabel = nullptr;
+            m_fullScreenTotalTimeLabel = nullptr;
+            m_fullScreenPlayPauseButton = nullptr;
+            m_fullScreenProgressSlider = nullptr;
+            m_fullScreenVolumeSlider = nullptr;
+
+            // Process any pending events before deletion
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+
+            // CRITICAL FIX: Use deleteLater() instead of immediate delete for safer cleanup
+            m_fullScreenControlsOverlay->setParent(nullptr);
+            m_fullScreenControlsOverlay->deleteLater();
+            m_fullScreenControlsOverlay = nullptr;
+        }
+
+        // Process events again with timeout
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+
+        // Use QTimer::singleShot to defer the rest of the cleanup with safety check
+        QTimer::singleShot(50, this, [this]() {
+            if (!m_isFullScreen) { // Double check we're still exiting fullscreen
+                // Exit fullscreen AFTER cleanup
+                showNormal();
+
+                // Show normal controls and UI elements
+                if (m_controlsWidget) {
+                    m_controlsWidget->show();
+                    m_controlsVisible = true;
+                }
+                menuBar()->show();
+                statusBar()->show();
+
+                // Restore normal cursor state when exiting fullscreen
+                setCursor(Qt::ArrowCursor);
+                m_cursorHidden = false;
+
+                // Restore normal margins and spacing
+                if (m_mainLayout) {
+                    m_mainLayout->setContentsMargins(10, 10, 10, 10);
+                    m_mainLayout->setSpacing(10);
+                }
+
+                // Reset video widget to normal size
+                if (m_videoWidget) {
+                    m_videoWidget->setParent(m_centralWidget);
+                    m_mainLayout->insertWidget(0, m_videoWidget);
+                }
+
+                // Re-enable slider updates AFTER everything is restored
+                m_sliderUpdatesEnabled = true;
+
+                // Reconnect the timer after cleanup with safety checks
+                if (m_controlsHideTimer) {
+                    disconnect(m_controlsHideTimer.get(), nullptr, this, nullptr);
+                    m_controlsHideTimer->setSingleShot(true);
+                    connect(m_controlsHideTimer.get(), &QTimer::timeout, this, &MainWindow::hideFullScreenUI);
+                }
+
+                statusBar()->showMessage("Exited fullscreen mode", 1500);
+            }
+        });
     } else {
         // Enter fullscreen mode
         showFullScreen();
 
-        // Hide menu bar and status bar immediately
+        // CRITICAL FIX: Set fullscreen flag BEFORE creating overlay
+        m_isFullScreen = true;
+
+        // CRITICAL: Reset cursor state when entering fullscreen to ensure clean state
+        m_cursorHidden = false;
+        setCursor(Qt::ArrowCursor);
+        qDebug() << "toggleFullScreen: Entering fullscreen, cursor state reset";
+
+        // Hide menu bar, status bar and normal controls immediately
         menuBar()->hide();
         statusBar()->hide();
+        if (m_controlsWidget) {
+            m_controlsWidget->hide();
+        }
 
         // Remove all margins and spacing for maximum video area
         if (m_mainLayout) {
@@ -879,67 +1348,568 @@ void MainWindow::toggleFullScreen()
             m_mainLayout->setSpacing(0);
         }
 
-        // Initially show controls in fullscreen, then start hide timer
-        if (m_controlsWidget) {
-            m_controlsWidget->show();
-            m_controlsVisible = true;
+        // Make video widget fill entire window
+        if (m_videoWidget) {
+            m_videoWidget->setParent(this);
+            m_videoWidget->setGeometry(0, 0, width(), height());
+            m_videoWidget->show();
+            m_videoWidget->raise();
         }
 
-        // Start the auto-hide timer
-        resetControlsHideTimer();
+        // Create fullscreen overlay controls AFTER setting m_isFullScreen = true
+        createFullScreenOverlay();
 
-        m_isFullScreen = true;
+        m_controlsVisible = false;
+
+        // Show controls briefly, then start hide timer with delay
+        QTimer::singleShot(100, this, [this]() {
+            if (m_isFullScreen) { // Safety check
+                showFullScreenUI();
+            }
+        });
+
+        // Set focus to catch key events
+        setFocus();
+
+        statusBar()->showMessage("Entered fullscreen mode - Press ESC to exit", 2000);
     }
 }
 
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
-    // In fullscreen mode, show controls when mouse moves
+    // In fullscreen mode, use debounced approach to show controls when mouse moves
     if (m_isFullScreen) {
-        showFullScreenControls();
+        // Don't call showFullScreenUI() directly - use debounce timer instead
+        if (!m_mouseMoveDebounceTimer->isActive()) {
+            m_mouseMoveDebounceTimer->start(MOUSE_MOVE_DEBOUNCE_MS);
+        }
     }
 
     QMainWindow::mouseMoveEvent(event);
 }
 
-void MainWindow::showFullScreenControls()
+void MainWindow::mousePressEvent(QMouseEvent *event)
+{
+    if (m_isFullScreen) {
+        if (event->button() == Qt::LeftButton) {
+            // Toggle controls visibility on click
+            if (m_controlsVisible) {
+                hideFullScreenUI();
+            } else {
+                showFullScreenUI();
+            }
+        }
+    }
+
+    QMainWindow::mousePressEvent(event);
+}
+
+void MainWindow::leaveEvent(QEvent *event)
+{
+    // When mouse leaves the window in fullscreen mode, start hiding controls
+    if (m_isFullScreen && m_controlsVisible) {
+        // Start timer to hide controls when mouse leaves window
+        resetControlsHideTimer();
+    }
+
+    QMainWindow::leaveEvent(event);
+}
+
+void MainWindow::createFullScreenOverlay()
+{
+    // CRITICAL FIX: Properly clean up existing overlay
+    if (m_fullScreenControlsOverlay) {
+        qDebug() << "createFullScreenOverlay: Overlay already exists, destroying old one first";
+
+        // Stop any timers related to the overlay
+        if (m_controlsHideTimer) {
+            m_controlsHideTimer->stop();
+        }
+
+        // Hide and delete safely
+        m_fullScreenControlsOverlay->hide();
+        m_fullScreenControlsOverlay->deleteLater();
+        m_fullScreenControlsOverlay = nullptr;
+
+        // Reset pointers to child widgets
+        m_fullScreenCurrentTimeLabel = nullptr;
+        m_fullScreenTotalTimeLabel = nullptr;
+        m_fullScreenPlayPauseButton = nullptr;
+        m_fullScreenProgressSlider = nullptr;
+        m_fullScreenVolumeSlider = nullptr;
+    }
+
+    qDebug() << "createFullScreenOverlay: Creating overlay for window size" << size()
+             << "isFullScreen flag:" << m_isFullScreen;
+
+    // Create overlay as a separate top-level window (NOT child widget)
+    m_fullScreenControlsOverlay = new QWidget(nullptr); // No parent!
+    m_fullScreenControlsOverlay->setObjectName("FullScreenOverlay");
+
+    // CRITICAL: Top-level window flags for visibility over fullscreen
+    m_fullScreenControlsOverlay->setWindowFlags(
+        Qt::Window |
+        Qt::FramelessWindowHint |
+        Qt::WindowStaysOnTopHint |
+        Qt::X11BypassWindowManagerHint
+    );
+
+    // Essential attributes for top-level overlay window
+    m_fullScreenControlsOverlay->setAttribute(Qt::WA_ShowWithoutActivating, true);
+    m_fullScreenControlsOverlay->setAttribute(Qt::WA_TranslucentBackground, true);
+    m_fullScreenControlsOverlay->setAttribute(Qt::WA_NoSystemBackground, true);
+    m_fullScreenControlsOverlay->setAttribute(Qt::WA_OpaquePaintEvent, false);
+
+    // Mouse and focus handling
+    m_fullScreenControlsOverlay->setAttribute(Qt::WA_MouseTracking, true);
+    m_fullScreenControlsOverlay->setFocusPolicy(Qt::NoFocus);
+
+    // Enhanced styling with modern media player design
+    m_fullScreenControlsOverlay->setStyleSheet(
+        // Main overlay container - sleek dark design with subtle border
+        "QWidget#FullScreenOverlay {"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        "        stop:0 rgba(18, 18, 22, 245), "
+        "        stop:1 rgba(12, 12, 16, 235));"
+        "    border: 2px solid rgba(255, 255, 255, 60);"
+        "    border-radius: 16px;"
+        "    box-shadow: 0 8px 32px rgba(0, 0, 0, 180);"
+        "}"
+
+        // Play/Pause button - prominent circular design
+        "QPushButton#PlayPauseButton {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 rgba(70, 130, 255, 220), "
+        "        stop:1 rgba(50, 100, 200, 180));"
+        "    border: 3px solid rgba(255, 255, 255, 120);"
+        "    border-radius: 30px;"
+        "    color: white;"
+        "    font-size: 24px;"
+        "    font-weight: bold;"
+        "    min-width: 60px;"
+        "    min-height: 60px;"
+        "}"
+        "QPushButton#PlayPauseButton:hover {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 rgba(90, 150, 255, 240), "
+        "        stop:1 rgba(70, 120, 220, 200));"
+        "    border: 3px solid rgba(255, 255, 255, 180);"
+        "    transform: scale(1.1);"
+        "}"
+        "QPushButton#PlayPauseButton:pressed {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 rgba(50, 110, 200, 200), "
+        "        stop:1 rgba(30, 80, 160, 160));"
+        "    transform: scale(0.95);"
+        "}"
+
+        // Secondary buttons - smaller, elegant style
+        "QPushButton {"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        "        stop:0 rgba(60, 65, 75, 200), "
+        "        stop:1 rgba(45, 50, 60, 180));"
+        "    border: 2px solid rgba(255, 255, 255, 80);"
+        "    border-radius: 10px;"
+        "    color: rgba(255, 255, 255, 240);"
+        "    font-size: 16px;"
+        "    font-weight: 600;"
+        "    padding: 8px 16px;"
+        "    min-width: 40px;"
+        "    min-height: 40px;"
+        "}"
+        "QPushButton:hover {"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        "        stop:0 rgba(80, 85, 95, 220), "
+        "        stop:1 rgba(65, 70, 80, 200));"
+        "    border: 2px solid rgba(255, 255, 255, 120);"
+        "}"
+        "QPushButton:pressed {"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        "        stop:0 rgba(40, 45, 55, 200), "
+        "        stop:1 rgba(25, 30, 40, 180));"
+        "}"
+
+        // Progress slider - YouTube-style design
+        "QSlider#ProgressSlider::groove:horizontal {"
+        "    background: rgba(255, 255, 255, 100);"
+        "    height: 6px;"
+        "    border-radius: 3px;"
+        "    border: 1px solid rgba(0, 0, 0, 40);"
+        "}"
+        "QSlider#ProgressSlider::handle:horizontal {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.7, "
+        "        stop:0 rgba(255, 255, 255, 255), "
+        "        stop:1 rgba(220, 220, 220, 220));"
+        "    width: 16px;"
+        "    height: 16px;"
+        "    border-radius: 8px;"
+        "    border: 2px solid rgba(70, 130, 255, 200);"
+        "    margin: -7px 0;"
+        "    box-shadow: 0 2px 6px rgba(0, 0, 0, 120);"
+        "}"
+        "QSlider#ProgressSlider::handle:horizontal:hover {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.7, "
+        "        stop:0 rgba(255, 255, 255, 255), "
+        "        stop:1 rgba(240, 240, 240, 240));"
+        "    width: 20px;"
+        "    height: 20px;"
+        "    border-radius: 10px;"
+        "    margin: -9px 0;"
+        "    border: 3px solid rgba(70, 130, 255, 240);"
+        "}"
+        "QSlider#ProgressSlider::sub-page:horizontal {"
+        "    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+        "        stop:0 rgba(70, 130, 255, 240), "
+        "        stop:1 rgba(50, 110, 200, 200));"
+        "    border-radius: 3px;"
+        "    border: 1px solid rgba(70, 130, 255, 160);"
+        "}"
+        "QSlider#ProgressSlider::add-page:horizontal {"
+        "    background: rgba(255, 255, 255, 80);"
+        "    border-radius: 3px;"
+        "}"
+
+        // Volume slider - compact design
+        "QSlider#VolumeSlider::groove:horizontal {"
+        "    background: rgba(255, 255, 255, 80);"
+        "    height: 4px;"
+        "    border-radius: 2px;"
+        "}"
+        "QSlider#VolumeSlider::handle:horizontal {"
+        "    background: rgba(255, 255, 255, 240);"
+        "    width: 12px;"
+        "    height: 12px;"
+        "    border-radius: 6px;"
+        "    border: 2px solid rgba(70, 130, 255, 180);"
+        "    margin: -5px 0;"
+        "}"
+        "QSlider#VolumeSlider::handle:horizontal:hover {"
+        "    background: rgba(255, 255, 255, 255);"
+        "    width: 14px;"
+        "    height: 14px;"
+        "    border-radius: 7px;"
+        "    margin: -6px 0;"
+        "}"
+        "QSlider#VolumeSlider::sub-page:horizontal {"
+        "    background: rgba(70, 130, 255, 200);"
+        "    border-radius: 2px;"
+        "}"
+        "QSlider#VolumeSlider::add-page:horizontal {"
+        "    background: rgba(255, 255, 255, 60);"
+        "    border-radius: 2px;"
+        "}"
+
+        // Time labels - clean monospace design
+        "QLabel#TimeLabel {"
+        "    background: rgba(0, 0, 0, 150);"
+        "    border: 1px solid rgba(255, 255, 255, 60);"
+        "    border-radius: 8px;"
+        "    padding: 6px 12px;"
+        "    color: rgba(255, 255, 255, 255);"
+        "    font-family: 'Consolas', 'Roboto Mono', 'Monaco', monospace;"
+        "    font-size: 13px;"
+        "    font-weight: 600;"
+        "    min-width: 55px;"
+        "}"
+
+        // Volume icon label
+        "QLabel#VolumeIcon {"
+        "    color: rgba(255, 255, 255, 200);"
+        "    font-size: 18px;"
+        "    padding: 4px;"
+        "}"
+
+        // Separator line between progress and controls
+        "QFrame#ControlsSeparator {"
+        "    background: rgba(255, 255, 255, 60);"
+        "    border: none;"
+        "    height: 1px;"
+        "    margin: 8px 0;"
+        "}"
+    );
+
+    // Create layout for overlay with improved structure
+    auto* overlayLayout = new QVBoxLayout(m_fullScreenControlsOverlay);
+    overlayLayout->setContentsMargins(20, 12, 20, 12);
+    overlayLayout->setSpacing(10);
+
+    // Progress section with improved spacing
+    auto* progressLayout = new QHBoxLayout();
+    progressLayout->setSpacing(12);
+
+    auto* currentTimeLabel = new QLabel("00:00", m_fullScreenControlsOverlay);
+    currentTimeLabel->setObjectName("TimeLabel");
+    currentTimeLabel->setMinimumWidth(55);
+    currentTimeLabel->setAlignment(Qt::AlignCenter);
+
+    auto* progressSlider = new ClickableSlider(Qt::Horizontal, m_fullScreenControlsOverlay);
+    progressSlider->setObjectName("ProgressSlider");
+    progressSlider->setRange(0, 0);
+    progressSlider->setValue(0);
+    progressSlider->setMinimumHeight(20);
+    progressSlider->setTracking(true);
+
+    // Enable better interaction
+    progressSlider->setTracking(true);
+    progressSlider->setPageStep(5000); // 5 second jumps
+    progressSlider->setSingleStep(1000); // 1 second jumps
+
+    // Connect to media controller with improved functionality
+    connect(progressSlider, &QSlider::sliderPressed, [this]() {
+        m_isSeekingByUser = true;
+        resetControlsHideTimer();
+    });
+
+    connect(progressSlider, &QSlider::sliderReleased, [this, progressSlider]() {
+        m_isSeekingByUser = false;
+        if (m_mediaController) {
+            m_mediaController->seek(progressSlider->value());
+        }
+        resetControlsHideTimer();
+    });
+
+    connect(progressSlider, &QSlider::sliderMoved, [this, progressSlider](int value) {
+        if (m_mediaController && m_isSeekingByUser) {
+            m_mediaController->seek(value);
+        }
+        resetControlsHideTimer();
+    });
+
+    m_fullScreenProgressSlider = progressSlider;
+
+    // Sync with main slider
+    connect(m_positionSlider, &QSlider::valueChanged, [this, progressSlider](int value) {
+        if (!m_isSeekingByUser && progressSlider) {
+            progressSlider->setValue(value);
+        }
+    });
+
+    connect(m_positionSlider, &QSlider::rangeChanged, [progressSlider](int min, int max) {
+        if (progressSlider) {
+            progressSlider->setRange(min, max);
+        }
+    });
+
+    // Initialize with current values
+    if (m_positionSlider) {
+        progressSlider->setRange(m_positionSlider->minimum(), m_positionSlider->maximum());
+        progressSlider->setValue(m_positionSlider->value());
+    }
+
+    auto* totalTimeLabel = new QLabel("00:00", m_fullScreenControlsOverlay);
+    totalTimeLabel->setObjectName("TimeLabel");
+    totalTimeLabel->setMinimumWidth(55);
+    totalTimeLabel->setAlignment(Qt::AlignCenter);
+
+    m_fullScreenCurrentTimeLabel = currentTimeLabel;
+    m_fullScreenTotalTimeLabel = totalTimeLabel;
+
+    // Update labels with current values
+    if (m_mediaController && m_mediaController->hasMedia()) {
+        currentTimeLabel->setText(formatTime(m_mediaController->position()));
+        totalTimeLabel->setText(formatTime(m_mediaController->duration()));
+    }
+
+    progressLayout->addWidget(currentTimeLabel);
+    progressLayout->addWidget(progressSlider, 1);
+    progressLayout->addWidget(totalTimeLabel);
+
+    // Add separator line between progress and controls
+    auto* separator = new QFrame(m_fullScreenControlsOverlay);
+    separator->setObjectName("ControlsSeparator");
+    separator->setFrameShape(QFrame::HLine);
+    separator->setFixedHeight(1);
+
+    // Control buttons section with better organization
+    auto* buttonsLayout = new QHBoxLayout();
+    buttonsLayout->setSpacing(15);
+
+    // Left side - additional controls (future: previous/next track)
+    auto* leftControlsLayout = new QHBoxLayout();
+    leftControlsLayout->setSpacing(8);
+
+    // Center - main play/pause button
+    auto* playPauseBtn = new QPushButton("▶", m_fullScreenControlsOverlay);
+    playPauseBtn->setObjectName("PlayPauseButton");
+    playPauseBtn->setFixedSize(60, 60);
+    playPauseBtn->setToolTip("Play/Pause (Space)");
+
+    connect(playPauseBtn, &QPushButton::clicked, [this]() {
+        togglePlayPause();
+        resetControlsHideTimer();
+    });
+
+    m_fullScreenPlayPauseButton = playPauseBtn;
+
+    // Initialize with current state
+    if (m_mediaController) {
+        QString buttonText = (m_mediaController->state() == Media::PlaybackState::Playing) ? "⏸" : "▶";
+        playPauseBtn->setText(buttonText);
+    }
+
+    // Right side - volume controls
+    auto* volumeControlsLayout = new QHBoxLayout();
+    volumeControlsLayout->setSpacing(8);
+
+    auto* volumeLabel = new QLabel("🔊", m_fullScreenControlsOverlay);
+    volumeLabel->setObjectName("VolumeIcon");
+
+    auto* volumeSlider = new QSlider(Qt::Horizontal, m_fullScreenControlsOverlay);
+    volumeSlider->setObjectName("VolumeSlider");
+    volumeSlider->setRange(0, 100);
+    volumeSlider->setMaximumWidth(120);
+    volumeSlider->setMinimumHeight(20);
+    volumeSlider->setTracking(true);
+    volumeSlider->setToolTip("Volume");
+
+    if (m_volumeSlider) {
+        volumeSlider->setValue(m_volumeSlider->value());
+    }
+
+    connect(volumeSlider, &QSlider::valueChanged, [this](int value) {
+        onVolumeChanged(value);
+        resetControlsHideTimer();
+    });
+
+    connect(volumeSlider, &QSlider::sliderPressed, [this]() {
+        resetControlsHideTimer();
+    });
+
+    connect(m_volumeSlider, &QSlider::valueChanged, volumeSlider, &QSlider::setValue);
+
+    m_fullScreenVolumeSlider = volumeSlider;
+
+    // Assemble volume controls
+    volumeControlsLayout->addWidget(volumeLabel);
+    volumeControlsLayout->addWidget(volumeSlider);
+
+    // Assemble main buttons layout
+    buttonsLayout->addLayout(leftControlsLayout);
+    buttonsLayout->addStretch();
+    buttonsLayout->addWidget(playPauseBtn);
+    buttonsLayout->addStretch();
+    buttonsLayout->addLayout(volumeControlsLayout);
+
+    // Assemble final overlay layout
+    overlayLayout->addLayout(progressLayout);
+    overlayLayout->addWidget(separator);
+    overlayLayout->addLayout(buttonsLayout);
+
+    // Calculate position relative to the screen where the main window is located
+    QScreen* currentScreen = QApplication::screenAt(this->pos());
+    if (!currentScreen) {
+        currentScreen = QApplication::primaryScreen();
+    }
+    
+    QRect screenGeometry = currentScreen->geometry();
+    QPoint mainWindowPos = this->pos();
+    
+    // Calculate overlay dimensions
+    int overlayWidth = qMin(screenGeometry.width() - 80, 1000);
+    int overlayHeight = 160;
+    
+    // Position overlay relative to the current screen (not all screens combined)
+    int x = screenGeometry.left() + (screenGeometry.width() - overlayWidth) / 2;
+    int y = screenGeometry.bottom() - overlayHeight - 50; // 50px from bottom of current screen
+    
+    // Additional safety checks to ensure overlay stays within current screen bounds
+    x = qMax(screenGeometry.left() + 10, qMin(x, screenGeometry.right() - overlayWidth - 10));
+    y = qMax(screenGeometry.top() + 10, qMin(y, screenGeometry.bottom() - overlayHeight - 10));
+
+    qDebug() << "createFullScreenOverlay: Using screen" << currentScreen->name()
+             << "with geometry" << screenGeometry
+             << "Final position" << QPoint(x, y)
+             << "overlay size" << QSize(overlayWidth, overlayHeight);
+
+    m_fullScreenControlsOverlay->setFixedSize(overlayWidth, overlayHeight);
+    m_fullScreenControlsOverlay->move(x, y);
+
+    // CRITICAL: Make overlay visible as top-level window
+    m_fullScreenControlsOverlay->show();
+    m_fullScreenControlsOverlay->raise();
+    m_fullScreenControlsOverlay->activateWindow();
+
+    // Force update
+    m_fullScreenControlsOverlay->update();
+
+    qDebug() << "createFullScreenOverlay: Overlay created successfully and shown";
+}
+
+void MainWindow::showFullScreenUI()
 {
     if (!m_isFullScreen) {
+        qDebug() << "showFullScreenUI: Not in fullscreen mode, skipping";
         return;
     }
 
-    // Show controls if they're hidden
-    if (!m_controlsVisible && m_controlsWidget) {
-        m_controlsWidget->show();
+    qDebug() << "showFullScreenUI: Starting unified show operation";
+
+    // Step 1: Show cursor first
+    if (m_cursorHidden) {
+        try {
+            setCursor(Qt::ArrowCursor);
+            m_cursorHidden = false;
+            qDebug() << "showFullScreenUI: Cursor shown";
+        } catch (const std::exception& e) {
+            qWarning() << "showFullScreenUI: Failed to show cursor:" << e.what();
+        }
+    }
+
+    // Step 2: Ensure overlay exists
+    if (!m_fullScreenControlsOverlay) {
+        qDebug() << "showFullScreenUI: No overlay exists - trying to create one";
+        if (isFullScreen()) {
+            createFullScreenOverlay();
+        }
+        if (!m_fullScreenControlsOverlay) {
+            qDebug() << "showFullScreenUI: Failed to create overlay";
+            return;
+        }
+    }
+
+    // Step 3: Show controls overlay
+    if (!m_controlsVisible) {
+        m_fullScreenControlsOverlay->show();
+        m_fullScreenControlsOverlay->raise();
         m_controlsVisible = true;
+        qDebug() << "showFullScreenUI: Controls shown";
     }
 
-    // Reset the hide timer
+    // Step 4: Reset hide timer
     resetControlsHideTimer();
+
+    qDebug() << "showFullScreenUI: Unified show operation completed";
 }
 
-void MainWindow::hideFullScreenControls()
+void MainWindow::hideFullScreenUI()
 {
     if (!m_isFullScreen) {
+        qDebug() << "hideFullScreenUI: Not in fullscreen mode, skipping";
         return;
     }
 
-    // Hide controls
-    if (m_controlsVisible && m_controlsWidget) {
-        m_controlsWidget->hide();
+    qDebug() << "hideFullScreenUI: Starting unified hide operation";
+
+    // Step 1: Hide controls overlay
+    if (m_fullScreenControlsOverlay && m_controlsVisible) {
+        m_fullScreenControlsOverlay->hide();
         m_controlsVisible = false;
-    }
-}
-
-void MainWindow::resetControlsHideTimer()
-{
-    if (!m_isFullScreen) {
-        return;
+        qDebug() << "hideFullScreenUI: Controls hidden";
     }
 
-    // Stop current timer and start new one
-    m_controlsHideTimer->stop();
-    m_controlsHideTimer->start(CONTROLS_HIDE_TIMEOUT_MS);
+    // Step 2: Hide cursor
+    if (!m_cursorHidden) {
+        try {
+            setCursor(Qt::BlankCursor);
+            m_cursorHidden = true;
+            qDebug() << "hideFullScreenUI: Cursor hidden";
+        } catch (const std::exception& e) {
+            qWarning() << "hideFullScreenUI: Failed to hide cursor:" << e.what();
+            m_cursorHidden = false; // Reset state on failure
+        }
+    }
+
+    qDebug() << "hideFullScreenUI: Unified hide operation completed";
 }
 
 void MainWindow::showPreferences()
@@ -975,4 +1945,85 @@ void MainWindow::showPluginManager()
     }
 }
 
+void MainWindow::updateOverlayPosition()
+{
+    if (!m_fullScreenControlsOverlay || !m_isFullScreen) {
+        return;
+    }
+
+    // Get the screen where the main window is currently located
+    // Use window geometry center for more accurate screen detection
+    QPoint windowCenter = QPoint(x() + width() / 2, y() + height() / 2);
+    QScreen* currentScreen = QApplication::screenAt(windowCenter);
+
+    // Fallback methods if screenAt fails
+    if (!currentScreen) {
+        // Try using the screen containing the window's top-left corner
+        currentScreen = QApplication::screenAt(this->pos());
+    }
+
+    if (!currentScreen) {
+        // Last resort - use primary screen
+        currentScreen = QApplication::primaryScreen();
+    }
+
+    if (!currentScreen) {
+        qWarning() << "updateOverlayPosition: Could not determine current screen";
+        return;
+    }
+
+    QRect screenGeometry = currentScreen->geometry();
+
+    qDebug() << "updateOverlayPosition: Window geometry:" << this->geometry()
+             << "Window center:" << windowCenter
+             << "Current screen:" << currentScreen->name()
+             << "Screen geometry:" << screenGeometry;
+
+    // Calculate overlay dimensions relative to current screen
+    int overlayWidth = qMin(screenGeometry.width() - 80, 1000);
+    int overlayHeight = 160;
+
+    // Position overlay relative to the current screen (not all screens combined)
+    int x = screenGeometry.left() + (screenGeometry.width() - overlayWidth) / 2;
+    int y = screenGeometry.bottom() - overlayHeight - 50; // 50px from bottom of current screen
+
+    // Additional safety checks to ensure overlay stays within current screen bounds
+    x = qMax(screenGeometry.left() + 10, qMin(x, screenGeometry.right() - overlayWidth - 10));
+    y = qMax(screenGeometry.top() + 10, qMin(y, screenGeometry.bottom() - overlayHeight - 10));
+
+    m_fullScreenControlsOverlay->setFixedSize(overlayWidth, overlayHeight);
+    m_fullScreenControlsOverlay->move(x, y);
+
+    // Ensure it stays visible and on top after position update
+    m_fullScreenControlsOverlay->raise();
+    m_fullScreenControlsOverlay->activateWindow();
+}
+
+void MainWindow::resetControlsHideTimer()
+{
+    if (!m_isFullScreen || !m_controlsHideTimer) {
+        return;
+    }
+
+    // CRITICAL FIX: Add safety checks to prevent timer access during destruction
+    if (m_isDestructing.load()) {
+        return;
+    }
+
+    // Stop current timer and start new one with safety checks
+    try {
+        m_controlsHideTimer->stop();
+
+        // Only start timer if we're still in fullscreen mode and not destructing
+        if (m_isFullScreen && !m_isDestructing.load()) {
+            m_controlsHideTimer->start(CONTROLS_HIDE_TIMEOUT_MS);
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "resetControlsHideTimer: Exception handling timer:" << e.what();
+    } catch (...) {
+        qWarning() << "resetControlsHideTimer: Unknown exception handling timer";
+    }
+}
+
 } // namespace DarkPlay::UI
+

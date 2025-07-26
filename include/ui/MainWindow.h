@@ -14,6 +14,8 @@
 #include <QStringList>
 #include <QPointer>
 #include <memory>
+#include <atomic>
+#include <mutex>
 
 // Include necessary headers for Media types
 #include "media/IMediaEngine.h"
@@ -50,6 +52,8 @@ protected:
     void closeEvent(QCloseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent* event) override;
 
 private slots:
     // File operations
@@ -102,11 +106,16 @@ private:
     void addToRecentFiles(const QString& filePath);
     void setAdaptiveLayout();
     void toggleFullScreen();
-    void showFullScreenControls();
-    void hideFullScreenControls();
+    void createFullScreenOverlay();
+    void updateOverlayPosition();
     void resetControlsHideTimer();
+    // Unified fullscreen UI management
+    void showFullScreenUI();
+    void hideFullScreenUI();
     [[nodiscard]] static QString formatTime(qint64 milliseconds);
 
+
+private:
     // Core application reference
     Core::Application* m_app;
 
@@ -149,13 +158,30 @@ private:
     bool m_isSeekingByUser;
     bool m_isFullScreen;
     bool m_controlsVisible;
+    bool m_cursorHidden; // Track cursor state to avoid redundant setCursor calls
+
+    // ULTIMATE CRASH PROTECTION: Add flags and mutex for safe slider updates
+    std::atomic<bool> m_sliderUpdatesEnabled{true};
+    std::atomic<bool> m_isDestructing{false};
+    mutable std::recursive_mutex m_sliderMutex;
+
+    // CRITICAL FIX: Use QPointer for safe widget access during destruction
+    QPointer<QWidget> m_fullScreenControlsOverlay;
+    QPointer<QLabel> m_fullScreenCurrentTimeLabel;
+    QPointer<QLabel> m_fullScreenTotalTimeLabel;
+    QPointer<QPushButton> m_fullScreenPlayPauseButton;
+    QPointer<ClickableSlider> m_fullScreenProgressSlider;
+    QPointer<QSlider> m_fullScreenVolumeSlider;
+
     std::unique_ptr<QTimer> m_updateTimer;
     std::unique_ptr<QTimer> m_controlsHideTimer;
+    std::unique_ptr<QTimer> m_mouseMoveDebounceTimer; // Timer to prevent too frequent UI updates
 
     // Constants
     static constexpr int UPDATE_INTERVAL_MS = 100;
     static constexpr int MAX_RECENT_FILES = 10;
     static constexpr int CONTROLS_HIDE_TIMEOUT_MS = 3000; // 3 seconds
+    static constexpr int MOUSE_MOVE_DEBOUNCE_MS = 100; // Debounce mouse move events
 };
 
 } // namespace DarkPlay::UI
