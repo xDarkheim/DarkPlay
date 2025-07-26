@@ -1,0 +1,35 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "debug-stable-video",
+            "displayName": "Debug with Stable Video",
+            "description": "Debug build with optimized video rendering settings",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/cmake-build-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_C_COMPILER": "gcc"
+            },
+            "environment": {
+                "QT_QPA_PLATFORM": "xcb",
+                "QT_OPENGL": "desktop",
+                "QT_MULTIMEDIA_PREFERRED_PLUGINS": "ffmpeg",
+                "QT_QUICK_BACKEND": "software",
+                "QSG_RENDER_LOOP": "basic",
+                "QT_XCB_GL_INTEGRATION": "xcb_glx",
+                "QT_LOGGING_RULES": "*.debug=false;qt.qpa.xcb.glx.debug=false",
+                "QT_X11_NO_MITSHM": "1",
+                "QT_AUTO_SCREEN_SCALE_FACTOR": "0"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug-stable-video",
+            "configurePreset": "debug-stable-video"
+        }
+    ]
+}
+

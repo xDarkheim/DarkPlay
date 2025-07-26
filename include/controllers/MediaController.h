@@ -1,20 +1,19 @@
 #ifndef DARKPLAY_CONTROLLERS_MEDIACONTROLLER_H
 #define DARKPLAY_CONTROLLERS_MEDIACONTROLLER_H
 
+#include <QObject>
+#include <QUrl>
 #include <QTimer>
-#include <QPointer>
+#include <QVideoSink>
 #include <memory>
-
-// Include full header instead of forward declaration for enums
-#include "media/IMediaEngine.h"
 #include "media/MediaManager.h"
-
-class QVideoSink;
+#include "media/IMediaEngine.h"
 
 namespace DarkPlay::Controllers {
 
 /**
- * @brief Controller for managing media playback with proper RAII and exception safety
+ * @brief High-level controller for media operations
+ * Acts as a bridge between UI and MediaManager
  */
 class MediaController : public QObject
 {
@@ -22,63 +21,90 @@ class MediaController : public QObject
 
 public:
     explicit MediaController(QObject* parent = nullptr);
-    ~MediaController() override = default;
+    ~MediaController() override;
 
-    // Delete copy and move operations for safety
-    MediaController(const MediaController&) = delete;
-    MediaController& operator=(const MediaController&) = delete;
-    MediaController(MediaController&&) = delete;
-    MediaController& operator=(MediaController&&) = delete;
+    // Media Manager access
+    [[nodiscard]] Media::MediaManager* mediaManager() const { return m_mediaManager.get(); }
 
-    // Media operations with exception safety
-    bool loadMedia(const QString& filePath) noexcept;
-    void play() noexcept;
-    void pause() noexcept;
-    void stop() noexcept;
-    void seek(qint64 position) noexcept;
-    void setVolume(float volume) noexcept;
+    // High-level playback control
+    bool openFile(const QString& filePath);
+    bool openUrl(const QUrl& url);
+    void play();
+    void pause();
+    void stop();
+    void togglePlayPause();
 
-    // Video output
-    void setVideoSink(QVideoSink* sink) noexcept;
-    [[nodiscard]] QVideoSink* videoSink() const noexcept;
+    // Seeking and position
+    void seek(qint64 position);
+    void seekRelative(qint64 offset);
+    [[nodiscard]] qint64 position() const;
+    [[nodiscard]] qint64 duration() const;
 
-    // State queries - all noexcept
-    [[nodiscard]] bool hasMedia() const noexcept;
-    [[nodiscard]] qint64 position() const noexcept;
-    [[nodiscard]] qint64 duration() const noexcept;
-    [[nodiscard]] float volume() const noexcept;
-    [[nodiscard]] Media::IMediaEngine::State state() const noexcept;
+    // Volume control
+    void setVolume(int volume);
+    [[nodiscard]] int volume() const;
+    void setMuted(bool muted);
+    [[nodiscard]] bool isMuted() const;
 
-    // Engine management
-    [[nodiscard]] bool isEngineAvailable() const noexcept { return static_cast<bool>(m_currentEngine); }
+    // Playback rate
+    void setPlaybackRate(qreal rate);
+    [[nodiscard]] qreal playbackRate() const;
+
+    // State information
+    [[nodiscard]] Media::PlaybackState state() const;
+    [[nodiscard]] QString errorString() const;
+    [[nodiscard]] bool hasMedia() const;
+
+    // Media information
+    [[nodiscard]] QString currentMediaUrl() const;
+    [[nodiscard]] QString title() const;
+    [[nodiscard]] QSize videoSize() const;
+    [[nodiscard]] bool hasVideo() const;
+    [[nodiscard]] bool hasAudio() const;
+
+    // Video output support
+    void setVideoSink(QVideoSink* sink);
+    [[nodiscard]] QVideoSink* videoSink() const;
+
+public slots:
+    // Convenience slots for UI binding
+    void onPlayRequested();
+    void onPauseRequested();
+    void onStopRequested();
+    void onVolumeChangeRequested(int volume);
+    void onSeekRequested(qint64 position);
 
 signals:
-    void mediaLoaded(const QString& fileName);
+    // High-level signals for UI
+    void mediaOpened(const QString& url);
+    void mediaLoadFailed(const QString& error);
+    void playbackStateChanged(Media::PlaybackState state);
+    void stateChanged(Media::PlaybackState state);  // Alias for playbackStateChanged
     void positionChanged(qint64 position);
     void durationChanged(qint64 duration);
-    void stateChanged(Media::IMediaEngine::State state);
-    void volumeChanged(float volume);
+    void volumeChanged(int volume);
+    void mutedChanged(bool muted);
+    void playbackRateChanged(qreal rate);
+    void mediaInfoChanged();
     void errorOccurred(const QString& error);
 
 private slots:
-    void onEnginePositionChanged(qint64 position);
-    void onEngineDurationChanged(qint64 duration);
-    void onEngineStateChanged(Media::IMediaEngine::State state);
-    void onEngineError(const QString& error);
+    // MediaManager signal handlers
+    void onManagerStateChanged(Media::PlaybackState state);
+    void onManagerPositionChanged(qint64 position);
+    void onManagerDurationChanged(qint64 duration);
+    void onManagerVolumeChanged(int volume);
+    void onManagerMutedChanged(bool muted);
+    void onManagerPlaybackRateChanged(qreal rate);
+    void onManagerMediaLoaded(const QString& url);
+    void onManagerError(const QString& error);
 
 private:
-    void connectEngineSignals() noexcept;
-    void disconnectEngineSignals() noexcept;
+    void setupConnections();
+    void initializeDefaultEngine();  // Remove static keyword
 
     std::unique_ptr<Media::MediaManager> m_mediaManager;
-    std::unique_ptr<Media::IMediaEngine> m_currentEngine;
-
-    // Use QPointer for safe access to Qt objects
-    QPointer<QVideoSink> m_videoSink;
-
-    // State tracking
-    QString m_currentFilePath;
-    float m_currentVolume{0.7f};
+    QString m_lastError;
 };
 
 } // namespace DarkPlay::Controllers

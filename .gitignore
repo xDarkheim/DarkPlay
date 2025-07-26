@@ -1,167 +1,79 @@
 # Build directories
 build/
 cmake-build-*/
-*build*/
-out/
+*.build/
 
-# CMake generated files
+# CMake
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
-cmake_install.cmake
+Testing/
 Makefile
-*.cmake
-!CMakeLists.txt
+cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 _deps/
 
-# Qt generated files
-*_autogen/
+# Qt
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
 *.moc
 moc_*.cpp
 moc_*.h
 qrc_*.cpp
 ui_*.h
-*.pro.user*
+*.rcc
 *.qmlc
 *.jsc
+Makefile*
+*build-*
+*.autosave
+*_autogen/
 
-# C++ compiled files
+# C++ objects and libs
+*.slo
+*.lo
 *.o
-*.obj
-*.so
-*.dylib
-*.dll
 *.a
-*.lib
-*.exp
-*.pdb
-*.exe
-*.out
-*.app
+*.la
+*.lai
+*.so
+*.so.*
+*.dll
+*.dylib
+
+# Qt Creator
+qtcreator-*
+*.pro.user*
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+
+# CLion
+.idea/
+cmake-build-*/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Temporary files
 *.tmp
 *.temp
 *~
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
-
-# IDE files
-.vscode/
-.idea/
-*.vcxproj*
-*.sln
-*.user
-*.userosscache
-*.sou
-*.suo
-*.ncb
-*.aps
-*.plg
-*.opt
-*.clw
-*.pch
-*.pdb
-*.idb
-*.ilk
-*.meta
-*.obj
-*.pch
-*.tlog
-*.log
-*.lastbuildstate
-
-# CLion
-cmake-build-*/
-.idea/
-
-# Qt Creator
-*.pro.user*
-*.autosave
-
-# Visual Studio Code
-.vscode/
-
-# macOS
-.DS_Store
-*.dSYM/
-
-# Linux
-*~
-*.core
-
-# Windows
-*.tmp
-*.log
-*.obj
-*.o
-*.a
-*.lib
-*.so
-*.dll
-*.exe
-*.pdb
-*.ilk
-*.exp
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# Package managers
-vcpkg_installed/
-conan.lock
-conanbuildinfo.*
-conandata.yml
-
-# Testing
-Testing/
-CTestTestfile.cmake
-tests/build/
-
-# Documentation
-docs/build/
-doxygen/
-
-# Backup files
-*.bak
-*.orig
-*.backup
 
 # Logs
 *.log
-logs/
-
-# Configuration files that shouldn't be tracked
-config.ini
-settings.conf
-*.local
-
-# Plugin build artifacts
-plugins/*.so
-plugins/*.dll
-plugins/*.dylib
-
-# Generated resource files
-resources/compiled/
-
-# Translation files (generated)
-*.qm
-
-# Qt linguist files that are generated
-*.ts~
-
-# Crash dumps
-*.dmp
-*.mdmp
-core.*
-
-# Performance profiling
-*.prof
-*.gprof
-callgrind.out.*
-massif.out.*

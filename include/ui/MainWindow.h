@@ -22,6 +22,7 @@
 namespace DarkPlay {
 namespace Core { class Application; }
 namespace Controllers { class MediaController; }
+namespace UI { class ClickableSlider; }
 }
 
 namespace DarkPlay::UI {
@@ -47,6 +48,7 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private slots:
     // File operations
@@ -63,13 +65,11 @@ private slots:
     // Media controller signal handlers
     void onPositionChanged(qint64 position);
     void onDurationChanged(qint64 duration);
-    void onStateChanged(Media::IMediaEngine::State state);
-    void onMediaStatusChanged(Media::IMediaEngine::MediaStatus status);
+    void onStateChanged(Media::PlaybackState state);
     void onErrorOccurred(const QString& error);
 
     // UI controls
     void onVolumeChanged(int value);
-    void onSeekPositionChanged(int value);
     void updateTimeLabels();
 
     // Settings and dialogs
@@ -100,6 +100,7 @@ private:
     void updateRecentFilesMenu();
     void addToRecentFiles(const QString& filePath);
     void setAdaptiveLayout();
+    void toggleFullScreen();
     [[nodiscard]] static QString formatTime(qint64 milliseconds);
 
     // Core application reference
@@ -122,12 +123,11 @@ private:
 
     // Control elements
     QPushButton* m_playPauseButton;
-    QPushButton* m_stopButton;
     QPushButton* m_previousButton;
     QPushButton* m_nextButton;
     QPushButton* m_openFileButton;
 
-    QSlider* m_positionSlider;
+    ClickableSlider* m_positionSlider;
     QLabel* m_currentTimeLabel;
     QLabel* m_totalTimeLabel;
 
@@ -143,6 +143,7 @@ private:
     // State management
     QStringList m_recentFiles;
     bool m_isSeekingByUser;
+    bool m_isFullScreen;
     std::unique_ptr<QTimer> m_updateTimer;
 
     // Constants

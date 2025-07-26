@@ -1,9 +1,7 @@
 #include "controllers/MediaController.h"
+#include "media/QtMediaEngine.h"
 #include "media/MediaManager.h"
-#include "media/IMediaEngine.h"
 #include <QFileInfo>
-#include <QUrl>
-#include <QVideoSink>
 #include <QDebug>
 
 namespace DarkPlay::Controllers {
@@ -11,272 +9,282 @@ namespace DarkPlay::Controllers {
 MediaController::MediaController(QObject* parent)
     : QObject(parent)
     , m_mediaManager(std::make_unique<Media::MediaManager>(this))
-    , m_currentVolume(0.7f)
 {
-    try {
-        // Create default media engine with proper error handling
-        m_currentEngine.reset(m_mediaManager->createEngine());
-
-        if (m_currentEngine) {
-            connectEngineSignals();
-            // Set initial volume
-            m_currentEngine->setVolume(m_currentVolume);
-        } else {
-            qWarning() << "Failed to create media engine";
-        }
-    } catch (const std::exception& e) {
-        qCritical() << "Exception in MediaController constructor:" << e.what();
-        // Don't rethrow - let object be constructed but mark as invalid
-        m_currentEngine.reset();
-    }
+    setupConnections();
+    initializeDefaultEngine();
 }
 
-bool MediaController::loadMedia(const QString& filePath) noexcept
+MediaController::~MediaController() = default;
+
+bool MediaController::openFile(const QString& filePath)
 {
-    try {
-        if (!m_currentEngine) {
-            emit errorOccurred("No media engine available");
-            return false;
-        }
-
-        if (filePath.isEmpty()) {
-            emit errorOccurred("Empty file path provided");
-            return false;
-        }
-
-        const QFileInfo fileInfo(filePath);
-        if (!fileInfo.exists()) {
-            emit errorOccurred(QString("File does not exist: %1").arg(filePath));
-            return false;
-        }
-
-        if (!fileInfo.isReadable()) {
-            emit errorOccurred(QString("File is not readable: %1").arg(filePath));
-            return false;
-        }
-
-        // Create URL and validate
-        const QUrl mediaUrl = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
-        if (!mediaUrl.isValid()) {
-            emit errorOccurred(QString("Invalid file path: %1").arg(filePath));
-            return false;
-        }
-
-        // Check if engine can handle this file
-        if (!m_currentEngine->canPlay(mediaUrl)) {
-            emit errorOccurred(QString("Unsupported media format: %1").arg(fileInfo.suffix()));
-            return false;
-        }
-
-        // Set source with error handling
-        m_currentEngine->setSource(mediaUrl);
-        m_currentFilePath = filePath;
-
-        emit mediaLoaded(fileInfo.fileName());
-        return true;
-
-    } catch (const std::exception& e) {
-        const QString error = QString("Failed to load media: %1").arg(e.what());
-        emit errorOccurred(error);
-        return false;
-    } catch (...) {
-        emit errorOccurred("Unknown error occurred while loading media");
+    QFileInfo fileInfo(filePath);
+    if (!fileInfo.exists() || !fileInfo.isReadable()) {
+        m_lastError = QString("File does not exist or is not readable: %1").arg(filePath);
+        emit mediaLoadFailed(m_lastError);
         return false;
     }
+
+    QUrl fileUrl = QUrl::fromLocalFile(filePath);
+    return openUrl(fileUrl);
 }
 
-void MediaController::play() noexcept
+bool MediaController::openUrl(const QUrl& url)
 {
-    try {
-        if (m_currentEngine && hasMedia()) {
-            m_currentEngine->play();
-        } else if (!hasMedia()) {
-            emit errorOccurred("No media loaded");
-        }
-    } catch (const std::exception& e) {
-        emit errorOccurred(QString("Playback error: %1").arg(e.what()));
-    } catch (...) {
-        emit errorOccurred("Unknown playback error");
-    }
-}
-
-void MediaController::pause() noexcept
-{
-    try {
-        if (m_currentEngine) {
-            m_currentEngine->pause();
-        }
-    } catch (const std::exception& e) {
-        emit errorOccurred(QString("Pause error: %1").arg(e.what()));
-    } catch (...) {
-        emit errorOccurred("Unknown pause error");
-    }
-}
-
-void MediaController::stop() noexcept
-{
-    try {
-        if (m_currentEngine) {
-            m_currentEngine->stop();
-        }
-    } catch (const std::exception& e) {
-        emit errorOccurred(QString("Stop error: %1").arg(e.what()));
-    } catch (...) {
-        emit errorOccurred("Unknown stop error");
-    }
-}
-
-void MediaController::seek(qint64 position) noexcept
-{
-    try {
-        if (m_currentEngine && hasMedia()) {
-            const qint64 clampedPosition = qBound(0LL, position, duration());
-            m_currentEngine->setPosition(clampedPosition);
-        }
-    } catch (const std::exception& e) {
-        emit errorOccurred(QString("Seek error: %1").arg(e.what()));
-    } catch (...) {
-        emit errorOccurred("Unknown seek error");
-    }
-}
-
-void MediaController::setVolume(float volume) noexcept
-{
-    try {
-        // Clamp volume to valid range
-        const float clampedVolume = qBound(0.0f, volume, 1.0f);
-        m_currentVolume = clampedVolume;
-
-        if (m_currentEngine) {
-            m_currentEngine->setVolume(clampedVolume);
-        }
-
-        emit volumeChanged(clampedVolume);
-    } catch (const std::exception& e) {
-        emit errorOccurred(QString("Volume control error: %1").arg(e.what()));
-    } catch (...) {
-        emit errorOccurred("Unknown volume control error");
-    }
-}
-
-void MediaController::setVideoSink(QVideoSink* sink) noexcept
-{
-    try {
-        m_videoSink = sink; // QPointer handles null automatically
-
-        if (m_currentEngine) {
-            m_currentEngine->setVideoSink(sink);
-        }
-    } catch (const std::exception& e) {
-        qWarning() << "Error setting video sink:" << e.what();
-    } catch (...) {
-        qWarning() << "Unknown error setting video sink";
-    }
-}
-
-QVideoSink* MediaController::videoSink() const noexcept
-{
-    return m_videoSink.data(); // Safe even if null
-}
-
-bool MediaController::hasMedia() const noexcept
-{
-    try {
-        return m_currentEngine &&
-               !m_currentEngine->source().isEmpty() &&
-               m_currentEngine->source().isValid();
-    } catch (...) {
+    if (!url.isValid()) {
+        m_lastError = "Invalid URL provided";
+        emit mediaLoadFailed(m_lastError);
         return false;
     }
+
+    bool success = m_mediaManager->loadMedia(url);
+    if (success) {
+        emit mediaOpened(url.toString());
+    } else {
+        m_lastError = m_mediaManager->errorString();
+        if (m_lastError.isEmpty()) {
+            m_lastError = "Failed to load media";
+        }
+        emit mediaLoadFailed(m_lastError);
+    }
+
+    return success;
 }
 
-qint64 MediaController::position() const noexcept
+void MediaController::play()
 {
-    try {
-        return m_currentEngine ? m_currentEngine->position() : 0;
-    } catch (...) {
-        return 0;
-    }
+    m_mediaManager->play();
 }
 
-qint64 MediaController::duration() const noexcept
+void MediaController::pause()
 {
-    try {
-        return m_currentEngine ? m_currentEngine->duration() : 0;
-    } catch (...) {
-        return 0;
-    }
+    m_mediaManager->pause();
 }
 
-float MediaController::volume() const noexcept
+void MediaController::stop()
 {
-    return m_currentVolume; // Use cached value to avoid exceptions
+    m_mediaManager->stop();
 }
 
-Media::IMediaEngine::State MediaController::state() const noexcept
+void MediaController::togglePlayPause()
 {
-    try {
-        return m_currentEngine ? m_currentEngine->state() : Media::IMediaEngine::State::Stopped;
-    } catch (...) {
-        return Media::IMediaEngine::State::Error;
-    }
+    m_mediaManager->togglePlayPause();
 }
 
-void MediaController::connectEngineSignals() noexcept
+void MediaController::seek(qint64 position)
 {
-    if (!m_currentEngine) {
-        return;
-    }
-
-    try {
-        connect(m_currentEngine.get(), &Media::IMediaEngine::positionChanged,
-                this, &MediaController::onEnginePositionChanged);
-        connect(m_currentEngine.get(), &Media::IMediaEngine::durationChanged,
-                this, &MediaController::onEngineDurationChanged);
-        connect(m_currentEngine.get(), &Media::IMediaEngine::stateChanged,
-                this, &MediaController::onEngineStateChanged);
-        connect(m_currentEngine.get(), &Media::IMediaEngine::errorOccurred,
-                this, &MediaController::onEngineError);
-    } catch (const std::exception& e) {
-        qWarning() << "Error connecting engine signals:" << e.what();
-    } catch (...) {
-        qWarning() << "Unknown error connecting engine signals";
-    }
+    m_mediaManager->setPosition(position);
 }
 
-void MediaController::disconnectEngineSignals() noexcept
+void MediaController::seekRelative(qint64 offset)
 {
-    if (!m_currentEngine) {
-        return;
-    }
-
-    try {
-        disconnect(m_currentEngine.get(), nullptr, this, nullptr);
-    } catch (const std::exception& e) {
-        qWarning() << "Error disconnecting engine signals:" << e.what();
-    } catch (...) {
-        qWarning() << "Unknown error disconnecting engine signals";
-    }
+    m_mediaManager->seek(offset);
 }
 
-void MediaController::onEnginePositionChanged(qint64 position)
+qint64 MediaController::position() const
+{
+    return m_mediaManager->position();
+}
+
+qint64 MediaController::duration() const
+{
+    return m_mediaManager->duration();
+}
+
+void MediaController::setVolume(int volume)
+{
+    m_mediaManager->setVolume(volume);
+}
+
+int MediaController::volume() const
+{
+    return m_mediaManager->volume();
+}
+
+void MediaController::setMuted(bool muted)
+{
+    m_mediaManager->setMuted(muted);
+}
+
+bool MediaController::isMuted() const
+{
+    return m_mediaManager->isMuted();
+}
+
+void MediaController::setPlaybackRate(qreal rate)
+{
+    m_mediaManager->setPlaybackRate(rate);
+}
+
+qreal MediaController::playbackRate() const
+{
+    return m_mediaManager->playbackRate();
+}
+
+Media::PlaybackState MediaController::state() const
+{
+    return m_mediaManager->state();
+}
+
+QString MediaController::errorString() const
+{
+    return m_lastError.isEmpty() ? m_mediaManager->errorString() : m_lastError;
+}
+
+bool MediaController::hasMedia() const
+{
+    return !m_mediaManager->currentMediaUrl().isEmpty();
+}
+
+QString MediaController::currentMediaUrl() const
+{
+    return m_mediaManager->currentMediaUrl();
+}
+
+QString MediaController::title() const
+{
+    return m_mediaManager->title();
+}
+
+QSize MediaController::videoSize() const
+{
+    return m_mediaManager->videoSize();
+}
+
+bool MediaController::hasVideo() const
+{
+    return m_mediaManager->hasVideo();
+}
+
+bool MediaController::hasAudio() const
+{
+    return m_mediaManager->hasAudio();
+}
+
+// Public slots
+void MediaController::onPlayRequested()
+{
+    play();
+}
+
+void MediaController::onPauseRequested()
+{
+    pause();
+}
+
+void MediaController::onStopRequested()
+{
+    stop();
+}
+
+void MediaController::onVolumeChangeRequested(int volume)
+{
+    setVolume(volume);
+}
+
+void MediaController::onSeekRequested(qint64 position)
+{
+    seek(position);
+}
+
+// Private slots - MediaManager signal handlers
+void MediaController::onManagerStateChanged(Media::PlaybackState state)
+{
+    emit playbackStateChanged(state);
+    emit stateChanged(state);  // Emit both signals for compatibility
+}
+
+void MediaController::onManagerPositionChanged(qint64 position)
 {
     emit positionChanged(position);
 }
 
-void MediaController::onEngineDurationChanged(qint64 duration)
+void MediaController::onManagerDurationChanged(qint64 duration)
 {
     emit durationChanged(duration);
 }
 
-void MediaController::onEngineStateChanged(Media::IMediaEngine::State state)
+void MediaController::onManagerVolumeChanged(int volume)
 {
-    emit stateChanged(state);
+    emit volumeChanged(volume);
 }
 
-void MediaController::onEngineError(const QString& error)
+void MediaController::onManagerMutedChanged(bool muted)
 {
+    emit mutedChanged(muted);
+}
+
+void MediaController::onManagerPlaybackRateChanged(qreal rate)
+{
+    emit playbackRateChanged(rate);
+}
+
+void MediaController::onManagerMediaLoaded(const QString& url)
+{
+    m_lastError.clear();
+    emit mediaInfoChanged();
+    emit mediaOpened(url);
+}
+
+void MediaController::onManagerError(const QString& error)
+{
+    m_lastError = error;
     emit errorOccurred(error);
+}
+
+void MediaController::setupConnections()
+{
+    if (!m_mediaManager) return;
+
+    connect(m_mediaManager.get(), &Media::MediaManager::stateChanged,
+            this, &MediaController::onManagerStateChanged);
+    connect(m_mediaManager.get(), &Media::MediaManager::positionChanged,
+            this, &MediaController::onManagerPositionChanged);
+    connect(m_mediaManager.get(), &Media::MediaManager::durationChanged,
+            this, &MediaController::onManagerDurationChanged);
+    connect(m_mediaManager.get(), &Media::MediaManager::volumeChanged,
+            this, &MediaController::onManagerVolumeChanged);
+    connect(m_mediaManager.get(), &Media::MediaManager::mutedChanged,
+            this, &MediaController::onManagerMutedChanged);
+    connect(m_mediaManager.get(), &Media::MediaManager::playbackRateChanged,
+            this, &MediaController::onManagerPlaybackRateChanged);
+    connect(m_mediaManager.get(), &Media::MediaManager::mediaLoaded,
+            this, &MediaController::onManagerMediaLoaded);
+    connect(m_mediaManager.get(), &Media::MediaManager::error,
+            this, &MediaController::onManagerError);
+}
+
+void MediaController::initializeDefaultEngine()
+{
+    // Create and set up Qt Media Engine as the default engine
+    auto qtEngine = std::make_unique<Media::QtMediaEngine>();
+
+    if (qtEngine) {
+        m_mediaManager->setMediaEngine(std::move(qtEngine));
+        qDebug() << "MediaController initialized with Qt Media Engine";
+    } else {
+        qWarning() << "Failed to create Qt Media Engine";
+    }
+}
+
+void MediaController::setVideoSink(QVideoSink* sink)
+{
+    if (m_mediaManager && m_mediaManager->mediaEngine()) {
+        // Check if the engine supports video output
+        if (auto* qtEngine = qobject_cast<Media::QtMediaEngine*>(m_mediaManager->mediaEngine())) {
+            qtEngine->setVideoSink(sink);
+        }
+    }
+}
+
+QVideoSink* MediaController::videoSink() const
+{
+    if (m_mediaManager && m_mediaManager->mediaEngine()) {
+        if (auto* qtEngine = qobject_cast<Media::QtMediaEngine*>(m_mediaManager->mediaEngine())) {
+            return qtEngine->videoSink();
+        }
+    }
+    return nullptr;
 }
 
 } // namespace DarkPlay::Controllers

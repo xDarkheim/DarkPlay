@@ -2,110 +2,80 @@
 #define DARKPLAY_MEDIA_IMEDIAENGINE_H
 
 #include <QObject>
+#include <QString>
 #include <QUrl>
-#include <QMediaPlayer>
-#include <QVideoSink>
+#include <QSize>
 
 namespace DarkPlay::Media {
 
-/**
- * @brief Abstract interface for media playbook engines
- */
-class IMediaEngine : public QObject
-{
+enum class PlaybackState {
+    Stopped,
+    Playing,
+    Paused,
+    Buffering,
+    Error
+};
+
+enum class MediaType {
+    Video,
+    Audio,
+    Unknown
+};
+
+class IMediaEngine : public QObject {
     Q_OBJECT
 
 public:
-    enum class State {
-        Stopped,
-        Playing,
-        Paused,
-        Buffering,
-        Error
-    };
-
-    enum class MediaStatus {
-        Unknown,
-        NoMedia,
-        Loading,
-        Loaded,
-        Buffering,
-        Buffered,
-        EndOfMedia,
-        InvalidMedia
-    };
-
     explicit IMediaEngine(QObject* parent = nullptr) : QObject(parent) {}
     ~IMediaEngine() override = default;
 
-    // Media control
-    virtual void setSource(const QUrl& url) = 0;
-    [[nodiscard]] virtual QUrl source() const = 0;
+    // Core playback methods
+    virtual bool loadMedia(const QUrl& url) = 0;
     virtual void play() = 0;
     virtual void pause() = 0;
     virtual void stop() = 0;
 
-    // Position and seeking
+    // Position and duration
     [[nodiscard]] virtual qint64 position() const = 0;
-    virtual void setPosition(qint64 position) = 0;
     [[nodiscard]] virtual qint64 duration() const = 0;
+    virtual void setPosition(qint64 position) = 0;
 
     // Volume control
-    [[nodiscard]] virtual float volume() const = 0;
-    virtual void setVolume(float volume) = 0;
+    [[nodiscard]] virtual int volume() const = 0;
+    virtual void setVolume(int volume) = 0;
     [[nodiscard]] virtual bool isMuted() const = 0;
     virtual void setMuted(bool muted) = 0;
 
     // Playback rate
-    [[nodiscard]] virtual float playbackRate() const = 0;
-    virtual void setPlaybackRate(float rate) = 0;
+    [[nodiscard]] virtual qreal playbackRate() const = 0;
+    virtual void setPlaybackRate(qreal rate) = 0;
 
-    // State queries
-    [[nodiscard]] virtual State state() const = 0;
-    [[nodiscard]] virtual MediaStatus mediaStatus() const = 0;
-    [[nodiscard]] virtual bool isAvailable() const = 0;
+    // State information
+    [[nodiscard]] virtual PlaybackState state() const = 0;
+    [[nodiscard]] virtual MediaType mediaType() const = 0;
+    [[nodiscard]] virtual QString errorString() const = 0;
 
-    // Supported formats
-    [[nodiscard]] virtual QStringList supportedMimeTypes() const = 0;
-    [[nodiscard]] virtual bool canPlay(const QUrl& url) const = 0;
-
-    // Video output
-    virtual void setVideoSink(QVideoSink* sink) = 0;
-    [[nodiscard]] virtual QVideoSink* videoSink() const = 0;
+    // Media information
+    [[nodiscard]] virtual QString title() const = 0;
+    [[nodiscard]] virtual QSize videoSize() const = 0;
+    [[nodiscard]] virtual bool hasVideo() const = 0;
+    [[nodiscard]] virtual bool hasAudio() const = 0;
 
 signals:
-    void sourceChanged(const QUrl& url);
-    void stateChanged(State state);
-    void mediaStatusChanged(MediaStatus status);
+    void stateChanged(PlaybackState state);
     void positionChanged(qint64 position);
     void durationChanged(qint64 duration);
-    void volumeChanged(float volume);
+    void volumeChanged(int volume);
     void mutedChanged(bool muted);
-    void playbackRateChanged(float rate);
-    void errorOccurred(const QString& error);
-    void bufferProgressChanged(float progress);
-};
-
-/**
- * @brief Factory interface for creating media engines
- */
-class IMediaEngineFactory
-{
-public:
-    virtual ~IMediaEngineFactory() = default;
-
-    [[nodiscard]] virtual QString name() const = 0;
-    [[nodiscard]] virtual QString description() const = 0;
-    [[nodiscard]] virtual int priority() const = 0;
-    [[nodiscard]] virtual QStringList supportedMimeTypes() const = 0;
-
-    virtual IMediaEngine* createEngine(QObject* parent) = 0;
-    [[nodiscard]] virtual bool isAvailable() const = 0;
+    void playbackRateChanged(qreal rate);
+    void mediaLoaded();
+    void error(const QString& errorString);
+    void bufferingProgress(int progress);
 };
 
 } // namespace DarkPlay::Media
 
-Q_DECLARE_METATYPE(DarkPlay::Media::IMediaEngine::State)
-Q_DECLARE_METATYPE(DarkPlay::Media::IMediaEngine::MediaStatus)
+Q_DECLARE_METATYPE(DarkPlay::Media::PlaybackState)
+Q_DECLARE_METATYPE(DarkPlay::Media::MediaType)
 
 #endif // DARKPLAY_MEDIA_IMEDIAENGINE_H

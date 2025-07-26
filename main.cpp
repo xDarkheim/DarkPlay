@@ -1,15 +1,24 @@
 #include <QApplication>
 #include "core/Application.h"
 #include "ui/MainWindow.h"
+#include "utils/QtEnvironmentSetup.h"
 #include <QMessageBox>
 #include <QDebug>
 #include <memory>
 
 int main(int argc, char *argv[])
 {
+    // Setup optimal Qt environment BEFORE creating QApplication
+    DarkPlay::Utils::setupOptimalQtEnvironment();
+
     try {
         // Create application instance with RAII
         DarkPlay::Core::Application app(argc, argv);
+
+        // Optional: output environment info for debugging
+        #ifdef QT_DEBUG
+        DarkPlay::Utils::logQtEnvironmentInfo();
+        #endif
 
         // Initialize core application systems with proper error handling
         if (!app.initialize()) {

@@ -1,4 +1,5 @@
 #include "ui/MainWindow.h"
+#include "ui/ClickableSlider.h"
 #include "controllers/MediaController.h"
 #include "core/Application.h"
 #include "core/ConfigManager.h"
@@ -15,6 +16,7 @@
 #include <QKeyEvent>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QResizeEvent>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -35,7 +37,6 @@ MainWindow::MainWindow(QWidget *parent)
     , m_progressLayout(nullptr)
     , m_controlButtonsLayout(nullptr)
     , m_playPauseButton(nullptr)
-    , m_stopButton(nullptr)
     , m_previousButton(nullptr)
     , m_nextButton(nullptr)
     , m_openFileButton(nullptr)
@@ -48,6 +49,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_recentFilesMenu(nullptr)
     , m_clearRecentAction(nullptr)
     , m_isSeekingByUser(false)
+    , m_isFullScreen(false)
     , m_updateTimer(std::make_unique<QTimer>(this))
 {
     // Check if application instance is available
@@ -116,7 +118,7 @@ void MainWindow::setupVideoWidget()
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_videoWidget->setMinimumSize(320, 240);
 
-    // Отложенная инициализация для предотвращения мерцания при запуске
+    // Delayed initialization to prevent startup flickering
     m_videoWidget->hide();
 
     // Apply comprehensive visual optimization
@@ -129,7 +131,7 @@ void MainWindow::setupVideoWidget()
 
     m_mainLayout->addWidget(m_videoWidget, 1); // Give it stretch factor
 
-    // Показываем виджет только после полной инициализации
+    // Show widget only after complete initialization
     QTimer::singleShot(100, this, [this]() {
         if (m_videoWidget) {
             m_videoWidget->show();
@@ -143,22 +145,22 @@ void MainWindow::optimizeVideoWidgetRendering()
         return;
     }
 
-    // Основные атрибуты для предотвращения мерцания
+    // Core attributes to prevent flickering
     m_videoWidget->setAttribute(Qt::WA_OpaquePaintEvent, true);
     m_videoWidget->setAttribute(Qt::WA_NoSystemBackground, true);
     m_videoWidget->setAttribute(Qt::WA_PaintOnScreen, false);
     m_videoWidget->setAttribute(Qt::WA_DontCreateNativeAncestors, true);
     m_videoWidget->setAttribute(Qt::WA_NativeWindow, false);
 
-    // Критически важные настройки для устранения лагов
+    // Critical settings to eliminate lag
     m_videoWidget->setAttribute(Qt::WA_DeleteOnClose, false);
     m_videoWidget->setAttribute(Qt::WA_NoChildEventsForParent, true);
     m_videoWidget->setAttribute(Qt::WA_DontShowOnScreen, false);
 
-    // Отключаем автоматическую заливку фона
+    // Disable automatic background filling
     m_videoWidget->setAutoFillBackground(false);
 
-    // Устанавливаем стабильный черный фон и убираем границы
+    // Set a stable black background and remove borders
     m_videoWidget->setStyleSheet(
         "QVideoWidget { "
         "background-color: #000000; "
@@ -168,23 +170,23 @@ void MainWindow::optimizeVideoWidgetRendering()
         "}"
     );
 
-    // Дополнительные атрибуты стабильности
+    // Additional stability attributes
     m_videoWidget->setAttribute(Qt::WA_StaticContents, true);
     m_videoWidget->setAttribute(Qt::WA_TranslucentBackground, false);
     m_videoWidget->setAttribute(Qt::WA_AlwaysShowToolTips, false);
 
-    // Оптимизация событий мыши и фокуса
+    // Optimize mouse and focus event handling
     m_videoWidget->setMouseTracking(false);
     m_videoWidget->setFocusPolicy(Qt::NoFocus);
 
-    // Принудительное обновление и размер
+    // Force update and size
     m_videoWidget->setUpdatesEnabled(true);
     m_videoWidget->setVisible(true);
 
-    // Устанавливаем фиксированную политику размера для стабильности
+    // Set a fixed size policy for stability
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    // Принудительно применяем изменения
+    // Force apply changes
     m_videoWidget->update();
     m_videoWidget->repaint();
 }
@@ -210,9 +212,41 @@ void MainWindow::setupMediaControls()
     m_currentTimeLabel->setMinimumWidth(50);
     m_currentTimeLabel->setAlignment(Qt::AlignCenter);
 
-    m_positionSlider = new QSlider(Qt::Horizontal, this);
+    m_positionSlider = new ClickableSlider(Qt::Horizontal, this);
     m_positionSlider->setRange(0, 0);
     m_positionSlider->setValue(0);
+
+    // Enable clicking on the slider track for instant seeking
+    m_positionSlider->setTracking(true);
+    m_positionSlider->setPageStep(5000); // 5 second jumps with page up/down
+    m_positionSlider->setSingleStep(1000); // 1 second jumps with arrow keys
+
+    // Make the slider more responsive to clicks
+    m_positionSlider->setStyleSheet(
+        "QSlider::groove:horizontal {"
+        "    border: 1px solid #999999;"
+        "    height: 8px;"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #B1B1B1, stop:1 #c4c4c4);"
+        "    margin: 2px 0;"
+        "    border-radius: 4px;"
+        "}"
+        "QSlider::handle:horizontal {"
+        "    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #b4b4b4, stop:1 #8f8f8f);"
+        "    border: 1px solid #5c5c5c;"
+        "    width: 14px;"
+        "    margin: -2px 0;"
+        "    border-radius: 7px;"
+        "}"
+        "QSlider::handle:horizontal:hover {"
+        "    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #d4d4d4, stop:1 #afafaf);"
+        "}"
+        "QSlider::sub-page:horizontal {"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #66e066, stop:1 #33cc33);"
+        "    border: 1px solid #777;"
+        "    height: 8px;"
+        "    border-radius: 4px;"
+        "}"
+    );
 
     m_totalTimeLabel = new QLabel("00:00", this);
     m_totalTimeLabel->setMinimumWidth(50);
@@ -230,12 +264,11 @@ void MainWindow::setupMediaControls()
     m_openFileButton = new QPushButton("Open", this);
     m_previousButton = new QPushButton("⏮", this);
     m_playPauseButton = new QPushButton("▶", this);
-    m_stopButton = new QPushButton("⏸", this);
     m_nextButton = new QPushButton("⏭", this);
 
     // Set button properties
     const QSize buttonSize(40, 40);
-    for (auto* button : {m_previousButton, m_playPauseButton, m_stopButton, m_nextButton}) {
+    for (auto* button : {m_previousButton, m_playPauseButton, m_nextButton}) {
         button->setFixedSize(buttonSize);
     }
 
@@ -243,7 +276,7 @@ void MainWindow::setupMediaControls()
     m_volumeLabel = new QLabel("🔊", this);
     m_volumeSlider = new QSlider(Qt::Horizontal, this);
     m_volumeSlider->setRange(0, 100);
-    m_volumeSlider->setValue(70);
+    m_volumeSlider->setValue(95); // Set to 95% for high volume by default
     m_volumeSlider->setMaximumWidth(100);
 
     // Loading progress bar
@@ -256,7 +289,6 @@ void MainWindow::setupMediaControls()
     m_controlButtonsLayout->addStretch();
     m_controlButtonsLayout->addWidget(m_previousButton);
     m_controlButtonsLayout->addWidget(m_playPauseButton);
-    m_controlButtonsLayout->addWidget(m_stopButton);
     m_controlButtonsLayout->addWidget(m_nextButton);
     m_controlButtonsLayout->addStretch();
     m_controlButtonsLayout->addWidget(m_volumeLabel);
@@ -318,6 +350,24 @@ void MainWindow::setupMenuBar()
     auto* pluginManagerAction = toolsMenu->addAction("&Plugin Manager...");
     connect(pluginManagerAction, &QAction::triggered, this, &MainWindow::showPluginManager);
 
+    toolsMenu->addSeparator();
+
+    // Auto-play toggle
+    auto* autoPlayAction = toolsMenu->addAction("&Auto-play on file open");
+    autoPlayAction->setCheckable(true);
+
+    // Load current auto-play setting
+    bool autoPlay = m_app->configManager()->getValue("playback/autoPlay", true).toBool();
+    autoPlayAction->setChecked(autoPlay);
+
+    connect(autoPlayAction, &QAction::triggered, [this](bool checked) {
+        if (auto* configManager = m_app->configManager()) {
+            configManager->setValue("playback/autoPlay", checked);
+            QString message = checked ? "Auto-play enabled" : "Auto-play disabled";
+            statusBar()->showMessage(message, 2000);
+        }
+    });
+
     // Help menu
     auto* helpMenu = menuBar()->addMenu("&Help");
 
@@ -361,14 +411,31 @@ void MainWindow::connectSignals()
     // UI control signals
     connect(m_openFileButton, &QPushButton::clicked, this, &MainWindow::openFile);
     connect(m_playPauseButton, &QPushButton::clicked, this, &MainWindow::togglePlayPause);
-    connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::stopPlayback);
     connect(m_previousButton, &QPushButton::clicked, this, &MainWindow::previousTrack);
     connect(m_nextButton, &QPushButton::clicked, this, &MainWindow::nextTrack);
 
-    // Slider signals
-    connect(m_positionSlider, &QSlider::sliderPressed, [this]() { m_isSeekingByUser = true; });
-    connect(m_positionSlider, &QSlider::sliderReleased, [this]() { m_isSeekingByUser = false; });
-    connect(m_positionSlider, &QSlider::valueChanged, this, &MainWindow::onSeekPositionChanged);
+    // Slider signals - improved logic for seeking
+    connect(m_positionSlider, &QSlider::sliderPressed, [this]() {
+        m_isSeekingByUser = true;
+    });
+
+    connect(m_positionSlider, &QSlider::sliderReleased, [this]() {
+        m_isSeekingByUser = false;
+        // Perform seek only when user releases the slider
+        if (m_mediaController) {
+            m_mediaController->seek(m_positionSlider->value());
+        }
+    });
+
+    // Handle clicks on the slider track (instant seeking)
+    connect(m_positionSlider, &QSlider::sliderMoved, [this](int value) {
+        // This allows instant seeking when user clicks on the track
+        if (m_mediaController && m_isSeekingByUser) {
+            m_mediaController->seek(value);
+        }
+    });
+
+    // Volume slider signal
     connect(m_volumeSlider, &QSlider::valueChanged, this, &MainWindow::onVolumeChanged);
 
     // Update timer
@@ -403,10 +470,22 @@ void MainWindow::openFile()
     );
 
     if (!fileName.isEmpty() && m_mediaController) {
-        if (m_mediaController->loadMedia(fileName)) {
+        if (m_mediaController->openFile(fileName)) {
             const QFileInfo fileInfo(fileName);
             addToRecentFiles(fileName);
             configManager->setValue("files/lastDirectory", fileInfo.absolutePath());
+
+            // Auto-play feature: automatically start playback if enabled
+            bool autoPlay = configManager->getValue("playback/autoPlay", true).toBool();
+            if (autoPlay) {
+                // Start playback after a small delay to ensure media is ready
+                QTimer::singleShot(100, this, [this]() {
+                    if (m_mediaController && m_mediaController->hasMedia()) {
+                        m_mediaController->play();
+                        statusBar()->showMessage("Auto-playing media file...", 2000);
+                    }
+                });
+            }
         }
     }
 }
@@ -423,9 +502,23 @@ void MainWindow::openRecentFile()
         return;
     }
 
-    if (m_mediaController->loadMedia(fileName)) {
+    if (m_mediaController->openFile(fileName)) {
         const QFileInfo fileInfo(fileName);
         statusBar()->showMessage(tr("Loaded: %1").arg(fileInfo.fileName()));
+
+        // Auto-play feature for recent files too
+        if (auto* configManager = m_app->configManager()) {
+            bool autoPlay = configManager->getValue("playback/autoPlay", true).toBool();
+            if (autoPlay) {
+                // Start playback after a small delay to ensure media is ready
+                QTimer::singleShot(100, this, [this]() {
+                    if (m_mediaController && m_mediaController->hasMedia()) {
+                        m_mediaController->play();
+                        statusBar()->showMessage("Auto-playing recent file...", 2000);
+                    }
+                });
+            }
+        }
     } else {
         // Remove invalid file from recent files
         m_recentFiles.removeAll(fileName);
@@ -456,7 +549,7 @@ void MainWindow::togglePlayPause()
     }
 
     auto state = m_mediaController->state();
-    if (state == Media::IMediaEngine::State::Playing) {
+    if (state == Media::PlaybackState::Playing) {
         m_mediaController->pause();
     } else {
         m_mediaController->play();
@@ -496,25 +589,25 @@ void MainWindow::onDurationChanged(qint64 duration)
     }
 }
 
-void MainWindow::onStateChanged(Media::IMediaEngine::State state)
+void MainWindow::onStateChanged(Media::PlaybackState state)
 {
     updatePlayPauseButton();
 
     QString statusText;
     switch (state) {
-        case Media::IMediaEngine::State::Playing:
+        case Media::PlaybackState::Playing:
             statusText = "Playing";
             break;
-        case Media::IMediaEngine::State::Paused:
+        case Media::PlaybackState::Paused:
             statusText = "Paused";
             break;
-        case Media::IMediaEngine::State::Stopped:
+        case Media::PlaybackState::Stopped:
             statusText = "Stopped";
             break;
-        case Media::IMediaEngine::State::Buffering:
+        case Media::PlaybackState::Buffering:
             statusText = "Buffering...";
             break;
-        case Media::IMediaEngine::State::Error:
+        case Media::PlaybackState::Error:
             statusText = "Error";
             break;
     }
@@ -524,24 +617,6 @@ void MainWindow::onStateChanged(Media::IMediaEngine::State state)
     }
 }
 
-void MainWindow::onMediaStatusChanged(Media::IMediaEngine::MediaStatus status)
-{
-    switch (status) {
-        case Media::IMediaEngine::MediaStatus::Loading:
-            if (m_loadingProgressBar) {
-                m_loadingProgressBar->setVisible(true);
-            }
-            break;
-        case Media::IMediaEngine::MediaStatus::Loaded:
-        case Media::IMediaEngine::MediaStatus::Buffered:
-            if (m_loadingProgressBar) {
-                m_loadingProgressBar->setVisible(false);
-            }
-            break;
-        default:
-            break;
-    }
-}
 
 void MainWindow::onErrorOccurred(const QString& error)
 {
@@ -557,7 +632,7 @@ void MainWindow::onVolumeChanged(int value)
         m_mediaController->setVolume(volume);
 
         // Update volume icon
-        QString icon = "��";
+        QString icon = "🔇";
         if (value > 50) icon = "🔊";
         else if (value > 0) icon = "🔉";
         m_volumeLabel->setText(icon);
@@ -569,12 +644,6 @@ void MainWindow::onVolumeChanged(int value)
     }
 }
 
-void MainWindow::onSeekPositionChanged(int value)
-{
-    if (m_mediaController) {
-        m_mediaController->seek(value);
-    }
-}
 
 void MainWindow::updateTimeLabels()
 {
@@ -588,7 +657,7 @@ void MainWindow::updatePlayPauseButton()
 {
     if (!m_mediaController) return;
 
-    if (m_mediaController->state() == Media::IMediaEngine::State::Playing) {
+    if (m_mediaController->state() == Media::PlaybackState::Playing) {
         m_playPauseButton->setText("⏸");
     } else {
         m_playPauseButton->setText("▶");
@@ -692,7 +761,7 @@ void MainWindow::loadSettings()
     updateRecentFilesMenu();
 
     // Volume - use MediaController instead of direct engine access
-    float volume = configManager->getValue("media/volume", 0.7).toFloat();
+    float volume = configManager->getValue("media/volume", 0.85).toFloat(); // Increased from 0.7 to 0.85
     m_volumeSlider->setValue(static_cast<int>(volume * 100));
     if (m_mediaController) {
         m_mediaController->setVolume(volume);
@@ -724,19 +793,15 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
             event->accept();
             break;
         case Qt::Key_Escape:
-            if (isFullScreen()) {
-                showNormal();
+            if (m_isFullScreen) {
+                toggleFullScreen();
                 event->accept();
             } else {
                 QMainWindow::keyPressEvent(event);
             }
             break;
         case Qt::Key_F11:
-            if (isFullScreen()) {
-                showNormal();
-            } else {
-                showFullScreen();
-            }
+            toggleFullScreen();
             event->accept();
             break;
         default:
@@ -749,6 +814,57 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     saveSettings();
     event->accept();
+}
+
+void MainWindow::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    // Check if double click occurred on the video widget area
+    if (m_videoWidget && m_videoWidget->geometry().contains(event->pos())) {
+        toggleFullScreen();
+        event->accept();
+    } else {
+        QMainWindow::mouseDoubleClickEvent(event);
+    }
+}
+
+void MainWindow::toggleFullScreen()
+{
+    if (m_isFullScreen) {
+        // Exit fullscreen mode
+        showNormal();
+
+        // Show controls and menu bar
+        if (m_controlsWidget) {
+            m_controlsWidget->show();
+        }
+        menuBar()->show();
+        statusBar()->show();
+
+        // Restore normal margins
+        if (m_mainLayout) {
+            m_mainLayout->setContentsMargins(10, 10, 10, 10);
+        }
+
+        m_isFullScreen = false;
+        statusBar()->showMessage("Exited fullscreen mode", 1500);
+    } else {
+        // Enter fullscreen mode
+        showFullScreen();
+
+        // Hide controls, menu bar and status bar for true fullscreen experience
+        if (m_controlsWidget) {
+            m_controlsWidget->hide();
+        }
+        menuBar()->hide();
+        statusBar()->hide();
+
+        // Remove margins for maximum video area
+        if (m_mainLayout) {
+            m_mainLayout->setContentsMargins(0, 0, 0, 0);
+        }
+
+        m_isFullScreen = true;
+    }
 }
 
 void MainWindow::showPreferences()

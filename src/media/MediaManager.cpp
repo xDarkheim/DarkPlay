@@ -1,328 +1,424 @@
 #include "media/MediaManager.h"
-#include "media/IMediaEngine.h"
-#include <QMediaPlayer>
-#include <QAudioOutput>
-#include <QVideoSink>
-#include <QFileInfo>
 #include <QDebug>
-#include <algorithm>
 
 namespace DarkPlay::Media {
 
-// Qt MediaPlayer engine implementation
-class QtMediaEngine : public IMediaEngine
-{
-    Q_OBJECT
-
-public:
-    explicit QtMediaEngine(QObject* parent = nullptr)
-        : IMediaEngine(parent)
-        , m_player(std::make_unique<QMediaPlayer>(this))
-        , m_audioOutput(std::make_unique<QAudioOutput>(this))
-        , m_videoSink(nullptr)
-    {
-        m_player->setAudioOutput(m_audioOutput.get());
-
-        // Suppress FFmpeg verbose logging for AAC decoder
-        qputenv("QT_LOGGING_RULES", "qt.multimedia.ffmpeg.debug=false");
-
-        // Fix signal connections - use lambda to handle parameter mismatch
-        connect(m_player.get(), &QMediaPlayer::playbackStateChanged,
-                this, &QtMediaEngine::onStateChanged);
-        connect(m_player.get(), &QMediaPlayer::mediaStatusChanged,
-               this, &QtMediaEngine::onMediaStatusChanged);
-        connect(m_player.get(), &QMediaPlayer::errorChanged,
-                this, [this]() {
-                    // Get the current error from the player
-                    onErrorOccurred(m_player->error());
-                });
-        connect(m_player.get(), &QMediaPlayer::positionChanged,
-                this, &IMediaEngine::positionChanged);
-        connect(m_player.get(), &QMediaPlayer::durationChanged,
-                this, &IMediaEngine::durationChanged);
-
-        qDebug() << "QtMediaEngine initialized successfully";
-    }
-
-    // IMediaEngine implementation with proper [[nodiscard]] attributes
-    void setSource(const QUrl& url) override {
-        try {
-            if (!url.isValid()) {
-                emit errorOccurred("Invalid URL provided");
-                return;
-            }
-
-            m_player->setSource(url);
-            emit sourceChanged(url);
-        } catch (const std::exception& e) {
-            emit errorOccurred(QString("Failed to set source: %1").arg(e.what()));
-        }
-    }
-
-    [[nodiscard]] QUrl source() const override { return m_player->source(); }
-
-    void play() override {
-        try {
-            if (m_player->source().isEmpty()) {
-                emit errorOccurred("No media source available");
-                return;
-            }
-            m_player->play();
-        } catch (const std::exception& e) {
-            emit errorOccurred(QString("Playback failed: %1").arg(e.what()));
-        }
-    }
-
-    void pause() override { m_player->pause(); }
-    void stop() override { m_player->stop(); }
-
-    [[nodiscard]] qint64 position() const override { return m_player->position(); }
-    void setPosition(qint64 position) override { m_player->setPosition(position); }
-    [[nodiscard]] qint64 duration() const override { return m_player->duration(); }
-
-    [[nodiscard]] float volume() const override { return m_audioOutput->volume(); }
-    void setVolume(float volume) override {
-        try {
-            if (volume < 0.0f || volume > 1.0f) {
-                qWarning() << "Volume out of range, clamping to [0.0, 1.0]";
-                volume = qBound(0.0f, volume, 1.0f);
-            }
-            m_audioOutput->setVolume(volume);
-            emit volumeChanged(volume);
-        } catch (const std::exception& e) {
-            emit errorOccurred(QString("Volume control failed: %1").arg(e.what()));
-        }
-    }
-    [[nodiscard]] bool isMuted() const override { return m_audioOutput->isMuted(); }
-    void setMuted(bool muted) override { m_audioOutput->setMuted(muted); }
-
-    // Fix narrowing conversion warning
-    [[nodiscard]] float playbackRate() const override {
-        return static_cast<float>(m_player->playbackRate());
-    }
-    void setPlaybackRate(float rate) override { m_player->setPlaybackRate(static_cast<qreal>(rate)); }
-
-    [[nodiscard]] State state() const override {
-        switch (m_player->playbackState()) {
-            case QMediaPlayer::StoppedState: return State::Stopped;
-            case QMediaPlayer::PlayingState: return State::Playing;
-            case QMediaPlayer::PausedState: return State::Paused;
-        }
-        return State::Stopped;
-    }
-
-    [[nodiscard]] MediaStatus mediaStatus() const override {
-        switch (m_player->mediaStatus()) {
-            case QMediaPlayer::NoMedia: return MediaStatus::NoMedia;
-            case QMediaPlayer::LoadingMedia: return MediaStatus::Loading;
-            case QMediaPlayer::LoadedMedia: return MediaStatus::Loaded;
-            case QMediaPlayer::BufferingMedia: return MediaStatus::Buffering;
-            case QMediaPlayer::BufferedMedia: return MediaStatus::Buffered;
-            case QMediaPlayer::EndOfMedia: return MediaStatus::EndOfMedia;
-            case QMediaPlayer::InvalidMedia: return MediaStatus::InvalidMedia;
-            default: return MediaStatus::Unknown;
-        }
-    }
-
-    [[nodiscard]] bool isAvailable() const override { return m_player->isAvailable(); }
-
-    [[nodiscard]] QStringList supportedMimeTypes() const override {
-        return QStringList() << "video/mp4" << "video/avi" << "video/x-msvideo"
-                            << "video/quicktime" << "video/x-ms-wmv" << "video/x-matroska"
-                            << "audio/mpeg" << "audio/wav" << "audio/flac" << "audio/ogg";
-    }
-
-    [[nodiscard]] bool canPlay(const QUrl& url) const override {
-        QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
-        QStringList supportedExtensions = {"mp4", "avi", "mkv", "mov", "wmv", "mp3", "wav", "flac", "ogg"};
-        return supportedExtensions.contains(suffix);
-    }
-
-    // Video output implementation
-    void setVideoSink(QVideoSink* sink) override {
-        m_videoSink = sink;
-        if (m_player && m_videoSink) {
-            m_player->setVideoSink(m_videoSink);
-        }
-    }
-
-    [[nodiscard]] QVideoSink* videoSink() const override {
-        return m_videoSink;
-    }
-
-private slots:
-    void onStateChanged(QMediaPlayer::PlaybackState state) {
-        Q_UNUSED(state)
-        emit stateChanged(this->state());
-    }
-
-    void onMediaStatusChanged(QMediaPlayer::MediaStatus status) {
-        Q_UNUSED(status)
-        emit mediaStatusChanged(mediaStatus());
-    }
-
-    void onErrorOccurred(QMediaPlayer::Error error) {
-        QString errorString;
-        switch (error) {
-            case QMediaPlayer::NoError:
-                return; // No error, nothing to emit
-            case QMediaPlayer::ResourceError:
-                errorString = "Resource error: Could not resolve media resource";
-                break;
-            case QMediaPlayer::FormatError:
-                errorString = "Format error: Unsupported media format";
-                break;
-            case QMediaPlayer::NetworkError:
-                errorString = "Network error: Network connection failed";
-                break;
-            case QMediaPlayer::AccessDeniedError:
-                errorString = "Access denied: Insufficient permissions";
-                break;
-            default:
-                errorString = "Unknown media player error";
-                break;
-        }
-
-        // Filter out common FFmpeg AAC warnings that are not critical
-        if (errorString.contains("env_facs_q") || errorString.contains("AAC")) {
-            qDebug() << "Non-critical audio warning:" << errorString;
-            return; // Don't emit these as errors
-        }
-
-        emit errorOccurred(errorString);
-    }
-
-private:
-    std::unique_ptr<QMediaPlayer> m_player;
-    std::unique_ptr<QAudioOutput> m_audioOutput;
-    QVideoSink* m_videoSink; // Not owned by this class
-};
-
-// Qt MediaPlayer factory with proper [[nodiscard]] attributes
-class QtMediaEngineFactory : public IMediaEngineFactory
-{
-public:
-    [[nodiscard]] QString name() const override { return "qt"; }
-    [[nodiscard]] QString description() const override { return "Qt Multimedia Engine"; }
-    [[nodiscard]] int priority() const override { return 100; }
-
-    [[nodiscard]] QStringList supportedMimeTypes() const override {
-        return QStringList() << "video/mp4" << "video/avi" << "video/x-msvideo"
-                            << "video/quicktime" << "video/x-ms-wmv" << "video/x-matroska"
-                            << "audio/mpeg" << "audio/wav" << "audio/flac" << "audio/ogg";
-    }
-
-    IMediaEngine* createEngine(QObject* parent) override {
-        return new QtMediaEngine(parent);
-    }
-
-    [[nodiscard]] bool isAvailable() const override { return true; }
-};
-
 MediaManager::MediaManager(QObject* parent)
     : QObject(parent)
+    , m_currentIndex(-1)
+    , m_autoPlay(false)
+    , m_repeatMode(false)
+    , m_previousVolume(50)
+    , m_positionTimer(new QTimer(this))
 {
-    setupDefaultEngines();
+    m_positionTimer->setInterval(100); // Update position every 100ms
+    connect(m_positionTimer, &QTimer::timeout, this, &MediaManager::onPositionTimer);
 }
 
 MediaManager::~MediaManager() = default;
 
-void MediaManager::registerEngineFactory(std::unique_ptr<IMediaEngineFactory> factory)
+void MediaManager::setMediaEngine(std::unique_ptr<IMediaEngine> engine)
 {
-    if (!factory) return;
-
-    m_engineFactories.push_back(std::move(factory));
-
-    // Sort by priority (higher priority first)
-    std::ranges::sort(m_engineFactories,
-              [](const auto& a, const auto& b) {
-                  return a->priority() > b->priority();
-              });
-
-    emit supportedFormatsChanged();
-}
-
-QStringList MediaManager::availableEngines() const
-{
-    QStringList engines;
-    for (const auto& factory : m_engineFactories) {
-        if (factory->isAvailable()) {
-            engines.append(factory->name());
-        }
-    }
-    return engines;
-}
-
-IMediaEngine* MediaManager::createEngine(const QString& engineName) const
-{
-    if (engineName.isEmpty()) {
-        // Return the highest priority available engine
-        for (const auto& factory : m_engineFactories) {
-            if (factory->isAvailable()) {
-                return factory->createEngine(nullptr);
-            }
-        }
-        return nullptr;
+    if (m_engine) {
+        disconnectEngineSignals();
+        m_engine->stop();
     }
 
-    // Find specific engine
-    for (const auto& factory : m_engineFactories) {
-        if (factory->name() == engineName && factory->isAvailable()) {
-            return factory->createEngine(nullptr);
-        }
+    m_engine = std::move(engine);
+
+    if (m_engine) {
+        connectEngineSignals();
+    }
+}
+
+IMediaEngine* MediaManager::mediaEngine() const
+{
+    return m_engine.get();
+}
+
+bool MediaManager::loadMedia(const QUrl& url)
+{
+    if (!m_engine) {
+        qWarning() << "No media engine available";
+        return false;
     }
 
-    return nullptr;
+    m_currentUrl = url.toString();
+    bool success = m_engine->loadMedia(url);
+
+    if (success) {
+        emit mediaLoaded(m_currentUrl);
+    }
+
+    return success;
 }
 
-IMediaEngine* MediaManager::createEngineForUrl(const QUrl& url) const
+void MediaManager::play()
 {
-    IMediaEngineFactory* bestFactory = findBestEngine(url);
-    return bestFactory ? bestFactory->createEngine(nullptr) : nullptr;
-}
-
-void MediaManager::setCurrentEngine(std::unique_ptr<IMediaEngine> engine)
-{
-    m_currentEngine = std::move(engine);
-    emit engineChanged(m_currentEngine.get());
-}
-
-QStringList MediaManager::supportedFormats() const
-{
-    QStringList formats;
-    for (const auto& factory : m_engineFactories) {
-        if (factory->isAvailable()) {
-            formats.append(factory->supportedMimeTypes());
+    if (m_engine) {
+        m_engine->play();
+        if (!m_positionTimer->isActive()) {
+            m_positionTimer->start();
         }
     }
-    formats.removeDuplicates();
-    return formats;
 }
 
-bool MediaManager::canPlay(const QUrl& url) const
+void MediaManager::pause()
 {
-    return findBestEngine(url) != nullptr;
+    if (m_engine) {
+        m_engine->pause();
+        m_positionTimer->stop();
+    }
 }
 
-void MediaManager::setupDefaultEngines()
+void MediaManager::stop()
 {
-    // Register Qt Multimedia engine
-    registerEngineFactory(std::make_unique<QtMediaEngineFactory>());
+    if (m_engine) {
+        m_engine->stop();
+        m_positionTimer->stop();
+    }
 }
 
-IMediaEngineFactory* MediaManager::findBestEngine(const QUrl& url) const
+void MediaManager::togglePlayPause()
 {
-    for (const auto& factory : m_engineFactories) {
-        if (factory->isAvailable()) {
-            auto engine = std::unique_ptr<IMediaEngine>(factory->createEngine(nullptr));
-            if (engine && engine->canPlay(url)) {
-                return factory.get();
-            }
+    if (!m_engine) return;
+
+    PlaybackState currentState = m_engine->state();
+    if (currentState == PlaybackState::Playing) {
+        pause();
+    } else if (currentState == PlaybackState::Paused || currentState == PlaybackState::Stopped) {
+        play();
+    }
+}
+
+qint64 MediaManager::position() const
+{
+    return m_engine ? m_engine->position() : 0;
+}
+
+qint64 MediaManager::duration() const
+{
+    return m_engine ? m_engine->duration() : 0;
+}
+
+void MediaManager::setPosition(qint64 position)
+{
+    if (m_engine) {
+        m_engine->setPosition(position);
+    }
+}
+
+void MediaManager::seek(qint64 offset)
+{
+    if (m_engine) {
+        qint64 newPosition = position() + offset;
+        newPosition = qMax(0LL, qMin(newPosition, duration()));
+        setPosition(newPosition);
+    }
+}
+
+void MediaManager::seekForward(qint64 seconds)
+{
+    seek(seconds * 1000); // Convert seconds to milliseconds
+}
+
+void MediaManager::seekBackward(qint64 seconds)
+{
+    seek(-seconds * 1000); // Convert seconds to milliseconds
+}
+
+int MediaManager::volume() const
+{
+    return m_engine ? m_engine->volume() : 50;
+}
+
+void MediaManager::setVolume(int volume)
+{
+    if (m_engine) {
+        volume = qBound(0, volume, 100);
+        m_engine->setVolume(volume);
+        if (volume > 0) {
+            m_previousVolume = volume;
         }
     }
-    return nullptr;
 }
 
-} // namespace DarkPlay
+void MediaManager::increaseVolume(int step)
+{
+    setVolume(volume() + step);
+}
 
-#include "MediaManager.moc"
+void MediaManager::decreaseVolume(int step)
+{
+    setVolume(volume() - step);
+}
+
+bool MediaManager::isMuted() const
+{
+    return m_engine ? m_engine->isMuted() : false;
+}
+
+void MediaManager::setMuted(bool muted)
+{
+    if (m_engine) {
+        m_engine->setMuted(muted);
+    }
+}
+
+void MediaManager::toggleMute()
+{
+    if (!m_engine) return;
+
+    if (isMuted()) {
+        setMuted(false);
+        if (volume() == 0 && m_previousVolume > 0) {
+            setVolume(m_previousVolume);
+        }
+    } else {
+        if (volume() > 0) {
+            m_previousVolume = volume();
+        }
+        setMuted(true);
+    }
+}
+
+qreal MediaManager::playbackRate() const
+{
+    return m_engine ? m_engine->playbackRate() : 1.0;
+}
+
+void MediaManager::setPlaybackRate(qreal rate)
+{
+    if (m_engine) {
+        rate = qBound(0.25, rate, 4.0); // Limit playback rate
+        m_engine->setPlaybackRate(rate);
+    }
+}
+
+void MediaManager::increaseSpeed()
+{
+    qreal currentRate = playbackRate();
+    qreal newRate = currentRate + 0.25;
+    setPlaybackRate(newRate);
+}
+
+void MediaManager::decreaseSpeed()
+{
+    qreal currentRate = playbackRate();
+    qreal newRate = currentRate - 0.25;
+    setPlaybackRate(newRate);
+}
+
+void MediaManager::resetSpeed()
+{
+    setPlaybackRate(1.0);
+}
+
+PlaybackState MediaManager::state() const
+{
+    return m_engine ? m_engine->state() : PlaybackState::Stopped;
+}
+
+MediaType MediaManager::mediaType() const
+{
+    return m_engine ? m_engine->mediaType() : MediaType::Unknown;
+}
+
+QString MediaManager::errorString() const
+{
+    return m_engine ? m_engine->errorString() : QString();
+}
+
+QString MediaManager::currentMediaUrl() const
+{
+    return m_currentUrl;
+}
+
+QString MediaManager::title() const
+{
+    return m_engine ? m_engine->title() : QString();
+}
+
+QSize MediaManager::videoSize() const
+{
+    return m_engine ? m_engine->videoSize() : QSize();
+}
+
+bool MediaManager::hasVideo() const
+{
+    return m_engine ? m_engine->hasVideo() : false;
+}
+
+bool MediaManager::hasAudio() const
+{
+    return m_engine ? m_engine->hasAudio() : false;
+}
+
+void MediaManager::setPlaylist(const QStringList& urls)
+{
+    m_playlist = urls;
+    m_currentIndex = urls.isEmpty() ? -1 : 0;
+    emit playlistChanged();
+    emit currentIndexChanged(m_currentIndex);
+
+    if (!urls.isEmpty() && m_autoPlay) {
+        loadCurrentMedia();
+    }
+}
+
+QStringList MediaManager::playlist() const
+{
+    return m_playlist;
+}
+
+int MediaManager::currentIndex() const
+{
+    return m_currentIndex;
+}
+
+void MediaManager::setCurrentIndex(int index)
+{
+    if (isValidIndex(index) && index != m_currentIndex) {
+        m_currentIndex = index;
+        emit currentIndexChanged(m_currentIndex);
+        loadCurrentMedia();
+    }
+}
+
+void MediaManager::next()
+{
+    if (hasNext()) {
+        setCurrentIndex(m_currentIndex + 1);
+    } else if (m_repeatMode && !m_playlist.isEmpty()) {
+        setCurrentIndex(0);
+    }
+}
+
+void MediaManager::previous()
+{
+    if (hasPrevious()) {
+        setCurrentIndex(m_currentIndex - 1);
+    } else if (m_repeatMode && !m_playlist.isEmpty()) {
+        setCurrentIndex(static_cast<int>(m_playlist.size() - 1));
+    }
+}
+
+bool MediaManager::hasNext() const
+{
+    return m_currentIndex < m_playlist.size() - 1;
+}
+
+bool MediaManager::hasPrevious() const
+{
+    return m_currentIndex > 0;
+}
+
+void MediaManager::setAutoPlay(bool enabled)
+{
+    m_autoPlay = enabled;
+}
+
+bool MediaManager::autoPlay() const
+{
+    return m_autoPlay;
+}
+
+void MediaManager::setRepeatMode(bool enabled)
+{
+    m_repeatMode = enabled;
+}
+
+bool MediaManager::repeatMode() const
+{
+    return m_repeatMode;
+}
+
+void MediaManager::onPositionTimer()
+{
+    if (m_engine && m_engine->state() == PlaybackState::Playing) {
+        emit positionChanged(m_engine->position());
+    }
+}
+
+void MediaManager::onEngineStateChanged(PlaybackState state)
+{
+    emit stateChanged(state);
+
+    // Handle automatic playlist advancement
+    if (state == PlaybackState::Stopped && m_autoPlay) {
+        if (hasNext()) {
+            next();
+            play();
+        } else if (m_repeatMode && !m_playlist.isEmpty()) {
+            setCurrentIndex(0);
+            play();
+        }
+    }
+}
+
+void MediaManager::onEnginePositionChanged(qint64 position)
+{
+    emit positionChanged(position);
+}
+
+void MediaManager::onEngineDurationChanged(qint64 duration)
+{
+    emit durationChanged(duration);
+}
+
+void MediaManager::onEngineError(const QString& error)
+{
+    qWarning() << "Media engine error:" << error;
+    emit this->error(error);
+
+    // Try to continue with next media if auto-play is enabled
+    if (m_autoPlay && hasNext()) {
+        next();
+    }
+}
+
+void MediaManager::connectEngineSignals()
+{
+    if (!m_engine) return;
+
+    connect(m_engine.get(), &IMediaEngine::stateChanged,
+            this, &MediaManager::onEngineStateChanged);
+    connect(m_engine.get(), &IMediaEngine::positionChanged,
+            this, &MediaManager::onEnginePositionChanged);
+    connect(m_engine.get(), &IMediaEngine::durationChanged,
+            this, &MediaManager::onEngineDurationChanged);
+    connect(m_engine.get(), &IMediaEngine::volumeChanged,
+            this, &MediaManager::volumeChanged);
+    connect(m_engine.get(), &IMediaEngine::mutedChanged,
+            this, &MediaManager::mutedChanged);
+    connect(m_engine.get(), &IMediaEngine::playbackRateChanged,
+            this, &MediaManager::playbackRateChanged);
+    connect(m_engine.get(), &IMediaEngine::mediaLoaded,
+            this, [this]() { emit mediaLoaded(m_currentUrl); });
+    connect(m_engine.get(), &IMediaEngine::error,
+            this, &MediaManager::onEngineError);
+    connect(m_engine.get(), &IMediaEngine::bufferingProgress,
+            this, &MediaManager::bufferingProgress);
+}
+
+void MediaManager::disconnectEngineSignals()
+{
+    if (!m_engine) return;
+
+    m_engine->disconnect(this);
+}
+
+void MediaManager::loadCurrentMedia()
+{
+    if (isValidIndex(m_currentIndex)) {
+        const QString& url = m_playlist.at(m_currentIndex);
+        loadMedia(QUrl(url));
+    }
+}
+
+bool MediaManager::isValidIndex(int index) const
+{
+    return index >= 0 && index < m_playlist.size();
+}
+
+} // namespace DarkPlay::Media
