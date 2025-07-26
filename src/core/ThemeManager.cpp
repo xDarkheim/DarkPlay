@@ -1,36 +1,35 @@
 #include "core/ThemeManager.h"
-#include <QJsonDocument>
-#include <QJsonObject>
+
 #include <QApplication>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
+#include <QStyleHints>
 #include <QDebug>
-#include <QReadLocker>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QSettings>
+#include <QDir>
+#include <QFileInfo>
 #include <QWriteLocker>
 #include <QMutexLocker>
+#include <QWidget>
+
+#ifdef Q_OS_WIN
+#include <QSettings>
+#endif
 
 namespace DarkPlay::Core {
 
 ThemeManager::ThemeManager(QObject* parent)
     : QObject(parent)
-    , m_currentTheme("dark")
+    , m_currentThemeType(ThemeType::Auto)
 {
-    try {
-        registerBuiltinThemes();
+    detectSystemTheme();
+    setupSystemThemeWatching();
 
-        // Initialize with dark theme
-        if (loadDarkTheme()) {
-            m_initialized.store(true, std::memory_order_release);
-        } else {
-            emitError("Failed to initialize with default dark theme");
-        }
+    // Load auto theme by default
+    loadAutoTheme();
 
-    } catch (const std::exception& e) {
-        emitError(QString("Exception in ThemeManager constructor: %1").arg(e.what()));
-    } catch (...) {
-        emitError("Unknown error in ThemeManager constructor");
-    }
+    m_initialized.store(true, std::memory_order_release);
 }
 
 bool ThemeManager::loadTheme(const QString& themeName) noexcept
@@ -40,58 +39,244 @@ bool ThemeManager::loadTheme(const QString& themeName) noexcept
         return false;
     }
 
+    if (!isThemeValid(themeName)) {
+        emitError(QString("Invalid theme name: %1").arg(themeName));
+        return false;
+    }
+
+    return loadAutoTheme();
+}
+
+bool ThemeManager::loadTheme(ThemeType themeType) noexcept
+{
+    if (themeType != ThemeType::Auto) {
+        emitError("Only Auto theme type is supported");
+        return false;
+    }
+
+    return loadAutoTheme();
+}
+
+bool ThemeManager::loadAutoTheme() noexcept
+{
     try {
-        QReadLocker themesLocker(&m_themesLock);
+        auto themeData = std::make_unique<ThemeData>();
+        themeData->name = "auto";
+        themeData->type = ThemeType::Auto;
 
-        auto it = m_themes.find(themeName);
-        if (it == m_themes.end()) {
-            emitError(QString("Theme not found: %1").arg(themeName));
-            return false;
+        // Apply system theme colors and palette
+        bool isDark = m_isSystemDark.load();
+        themeData->palette = isDark ? createDarkPalette() : createLightPalette();
+
+        // Set basic theme colors
+        QJsonObject colors;
+        if (isDark) {
+            colors["background"] = "#2b2b2b";
+            colors["foreground"] = "#ffffff";
+            colors["accent"] = "#4dabf7";
+        } else {
+            colors["background"] = "#ffffff";
+            colors["foreground"] = "#000000";
+            colors["accent"] = "#0066cc";
         }
+        themeData->colors = colors;
 
-        const ThemeData* themeData = it->second.get(); // Fix: use ->second instead of .value()
-        if (!themeData || !validateThemeData(*themeData)) {
-            emitError(QString("Invalid theme data: %1").arg(themeName));
-            return false;
-        }
-
-        // Create a copy of theme data for current theme
-        auto newCurrentTheme = std::make_unique<ThemeData>();
-        newCurrentTheme->name = themeData->name;
-        newCurrentTheme->styleSheet = themeData->styleSheet;
-        newCurrentTheme->colors = themeData->colors;
-
-        themesLocker.unlock();
-
-        // Update current theme atomically
+        // Apply the theme
         {
-            QMutexLocker currentLocker(&m_currentThemeMutex);
-            m_currentTheme = themeName;
-            m_currentThemeData = std::move(newCurrentTheme);
+            QMutexLocker locker(&m_currentThemeMutex);
+            m_currentTheme = themeData->name;
+            m_currentThemeType = themeData->type;
+            m_currentThemeData = std::move(themeData);
         }
 
-        // Apply stylesheet to application with error handling
-        try {
-            if (qApp) {
-                qApp->setStyleSheet(m_currentThemeData->styleSheet);
-            }
-        } catch (const std::exception& e) {
-            emitError(QString("Failed to apply stylesheet: %1").arg(e.what()));
-            return false;
-        }
+        // Apply palette to application
+        QApplication::setPalette(m_currentThemeData->palette);
 
-        emit themeChanged(themeName);
+        emit themeChanged(m_currentTheme);
+        emit themeTypeChanged(m_currentThemeType);
         emit styleSheetChanged(m_currentThemeData->styleSheet);
 
         return true;
 
     } catch (const std::exception& e) {
-        emitError(QString("Exception loading theme '%1': %2").arg(themeName, e.what()));
+        emitError(QString("Exception loading auto theme: %1").arg(e.what()));
         return false;
     } catch (...) {
-        emitError(QString("Unknown error loading theme '%1'").arg(themeName));
+        emitError("Unknown error loading auto theme");
         return false;
     }
+}
+
+ThemeManager::ThemeType ThemeManager::currentThemeType() const noexcept
+{
+    try {
+        QMutexLocker locker(&m_currentThemeMutex);
+        return m_currentThemeType;
+    } catch (...) {
+        return ThemeType::Auto;
+    }
+}
+
+void ThemeManager::enableSystemThemeAdaptation(bool enabled) noexcept
+{
+    m_systemThemeAdaptation.store(enabled, std::memory_order_release);
+
+    if (enabled && m_currentThemeType == ThemeType::Auto) {
+        applySystemTheme();
+    }
+}
+
+bool ThemeManager::isSystemThemeAdaptationEnabled() const noexcept
+{
+    return m_systemThemeAdaptation.load(std::memory_order_acquire);
+}
+
+bool ThemeManager::isSystemDarkTheme() const noexcept
+{
+    return m_isSystemDark.load(std::memory_order_acquire);
+}
+
+void ThemeManager::applySystemTheme() noexcept
+{
+    if (m_currentThemeType == ThemeType::Auto) {
+        loadAutoTheme();
+    }
+}
+
+void ThemeManager::adaptWindowFrame(QWidget* window) const noexcept
+{
+    if (!window) {
+        return;
+    }
+
+    try {
+        bool isDark = m_isSystemDark.load();
+
+#ifdef Q_OS_WIN
+        // Windows-specific window frame adaptation would go here
+        Q_UNUSED(window)
+        Q_UNUSED(isDark)
+#elif defined(Q_OS_MACOS)
+        // macOS-specific window frame adaptation would go here
+        Q_UNUSED(window)
+        Q_UNUSED(isDark)
+#else
+        // Linux/other platforms
+        Q_UNUSED(window)
+        Q_UNUSED(isDark)
+#endif
+
+    } catch (const std::exception& e) {
+        qDebug() << "ThemeManager: Error adapting window frame:" << e.what();
+    } catch (...) {
+        qDebug() << "ThemeManager: Unknown error adapting window frame";
+    }
+}
+
+void ThemeManager::onSystemThemeChanged()
+{
+    detectSystemTheme();
+    emit systemThemeChanged(m_isSystemDark.load());
+
+    if (m_systemThemeAdaptation.load() && m_currentThemeType == ThemeType::Auto) {
+        applySystemTheme();
+    }
+}
+
+
+void ThemeManager::setupSystemThemeWatching() noexcept
+{
+    try {
+        // Connect to Qt's style hints for theme changes
+        if (QStyleHints* hints = QApplication::styleHints()) {
+            connect(hints, &QStyleHints::colorSchemeChanged, this, &ThemeManager::onSystemThemeChanged);
+        }
+
+#ifdef Q_OS_WIN
+        // Windows: Use registry monitoring for theme changes
+        // This is handled by Qt's QStyleHints::colorSchemeChanged
+#endif
+
+        qDebug() << "ThemeManager: System theme watching enabled";
+
+    } catch (const std::exception& e) {
+        qDebug() << "ThemeManager: Error setting up system theme watching:" << e.what();
+    }
+}
+
+void ThemeManager::detectSystemTheme() noexcept
+{
+    try {
+        bool isDark = false;
+
+#ifdef Q_OS_LINUX
+        // Fallback: Check GTK settings
+        QSettings gtkSettings(QDir::homePath() + "/.config/gtk-3.0/settings.ini", QSettings::IniFormat);
+        QString themeName = gtkSettings.value("Settings/gtk-theme-name").toString().toLower();
+        isDark = themeName.contains("dark") || themeName.contains("adwaita-dark");
+#endif
+
+#ifdef Q_OS_WIN
+        // Windows: Check registry for dark mode preference
+        QSettings settings("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                          QSettings::NativeFormat);
+        int appsUseLightTheme = settings.value("AppsUseLightTheme", 1).toInt();
+        isDark = (appsUseLightTheme == 0);
+#endif
+
+#ifdef Q_OS_MACOS
+        // macOS: Check system appearance
+        // This is handled by Qt's QStyleHints::colorScheme()
+        if (QStyleHints* hints = QApplication::styleHints()) {
+            isDark = (hints->colorScheme() == Qt::ColorScheme::Dark);
+        }
+#endif
+
+        // Qt 6.5+ cross-platform method (primary detection method)
+        if (QStyleHints* hints = QApplication::styleHints()) {
+            Qt::ColorScheme colorScheme = hints->colorScheme();
+            if (colorScheme != Qt::ColorScheme::Unknown) {
+                isDark = (colorScheme == Qt::ColorScheme::Dark);
+            }
+        }
+
+        m_isSystemDark.store(isDark, std::memory_order_release);
+        qDebug() << "ThemeManager: Detected system theme - isDark:" << isDark;
+
+    } catch (const std::exception& e) {
+        qDebug() << "ThemeManager: Error detecting system theme:" << e.what();
+        // Default to light theme on error
+        m_isSystemDark.store(false, std::memory_order_release);
+    }
+}
+
+QPalette ThemeManager::createLightPalette() const noexcept
+{
+    // Use system palette with minimal customization
+    QPalette palette = QApplication::palette();
+    
+    // Only set essential colors for light theme consistency
+    palette.setColor(QPalette::Highlight, QColor("#0066cc"));
+    palette.setColor(QPalette::HighlightedText, QColor("#ffffff"));
+    palette.setColor(QPalette::Link, QColor("#0066cc"));
+    palette.setColor(QPalette::LinkVisited, QColor("#004499"));
+
+    return palette;
+}
+
+QPalette ThemeManager::createDarkPalette() const noexcept
+{
+    // Use system palette with minimal customization  
+    QPalette palette = QApplication::palette();
+    
+    // Only set essential colors for dark theme consistency
+    palette.setColor(QPalette::Highlight, QColor("#4dabf7"));
+    palette.setColor(QPalette::HighlightedText, QColor("#000000"));
+    palette.setColor(QPalette::Link, QColor("#4dabf7"));
+    palette.setColor(QPalette::LinkVisited, QColor("#339af0"));
+
+
+    return palette;
 }
 
 bool ThemeManager::loadThemeFromFile(const QString& filePath) noexcept
@@ -160,20 +345,8 @@ bool ThemeManager::loadThemeFromFile(const QString& filePath) noexcept
 
 QStringList ThemeManager::availableThemes() const
 {
-    try {
-        QReadLocker locker(&m_themesLock);
-
-        QStringList result;
-        result.reserve(static_cast<int>(m_themes.size()));
-
-        for (const auto& [name, themeData] : m_themes) {
-            result.append(name);
-        }
-
-        return result;
-    } catch (...) {
-        return {};
-    }
+    // Only "auto" theme is available
+    return QStringList{"auto"};
 }
 
 QString ThemeManager::currentTheme() const noexcept
@@ -223,301 +396,37 @@ QString ThemeManager::getColor(const QString& colorName) const
     }
 }
 
-bool ThemeManager::loadDarkTheme() noexcept
-{
-    return loadTheme("dark");
-}
-
-bool ThemeManager::loadLightTheme() noexcept
-{
-    return loadTheme("light");
-}
-
 bool ThemeManager::isThemeValid(const QString& themeName) const noexcept
 {
-    if (themeName.isEmpty()) {
-        return false;
-    }
-
-    try {
-        QReadLocker locker(&m_themesLock);
-        auto it = m_themes.find(themeName);
-        return (it != m_themes.end()) && validateThemeData(*it->second);
-    } catch (...) {
-        return false;
-    }
-}
-
-void ThemeManager::registerBuiltinThemes() noexcept
-{
-    try {
-        // Dark theme
-        auto darkTheme = std::make_unique<ThemeData>();
-        darkTheme->name = "dark";
-        darkTheme->colors = QJsonObject{
-            {"background", "#1e1e1e"},
-            {"surface", "#2d2d2d"},
-            {"primary", "#0078d4"},
-            {"secondary", "#404040"},
-            {"text", "#ffffff"},
-            {"textSecondary", "#cccccc"},
-            {"border", "#333333"},
-            {"accent", "#106ebe"},
-            {"error", "#e74c3c"},
-            {"success", "#27ae60"},
-            {"warning", "#f39c12"}
-        };
-
-        darkTheme->styleSheet = R"(
-            QMainWindow {
-                background-color: #1e1e1e;
-                color: #ffffff;
-            }
-
-            QWidget {
-                background-color: #1e1e1e;
-                color: #ffffff;
-            }
-
-            QPushButton {
-                background-color: #404040;
-                color: #ffffff;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-
-            QPushButton:hover {
-                background-color: #505050;
-            }
-
-            QPushButton:pressed {
-                background-color: #303030;
-            }
-
-            QPushButton#playButton {
-                background-color: #0078d4;
-                border-radius: 25px;
-                width: 50px;
-                height: 50px;
-                font-size: 16px;
-            }
-
-            QPushButton#playButton:hover {
-                background-color: #106ebe;
-            }
-
-            QSlider::groove:horizontal {
-                height: 6px;
-                background: #404040;
-                border-radius: 3px;
-            }
-
-            QSlider::handle:horizontal {
-                background: #0078d4;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-
-            QSlider::sub-page:horizontal {
-                background: #0078d4;
-                border-radius: 3px;
-            }
-
-            QLabel {
-                color: #ffffff;
-            }
-
-            QMenuBar {
-                background-color: #2d2d2d;
-                color: #ffffff;
-            }
-
-            QMenuBar::item:selected {
-                background-color: #0078d4;
-            }
-
-            QMenu {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #404040;
-            }
-
-            QMenu::item:selected {
-                background-color: #0078d4;
-            }
-
-            QStatusBar {
-                background-color: #2d2d2d;
-                color: #ffffff;
-            }
-        )";
-
-        // Light theme
-        auto lightTheme = std::make_unique<ThemeData>();
-        lightTheme->name = "light";
-        lightTheme->colors = QJsonObject{
-            {"background", "#ffffff"},
-            {"surface", "#f5f5f5"},
-            {"primary", "#0078d4"},
-            {"secondary", "#e0e0e0"},
-            {"text", "#000000"},
-            {"textSecondary", "#666666"},
-            {"border", "#cccccc"},
-            {"accent", "#106ebe"},
-            {"error", "#e74c3c"},
-            {"success", "#27ae60"},
-            {"warning", "#f39c12"}
-        };
-
-        lightTheme->styleSheet = R"(
-            QMainWindow {
-                background-color: #ffffff;
-                color: #000000;
-            }
-
-            QWidget {
-                background-color: #ffffff;
-                color: #000000;
-            }
-
-            QPushButton {
-                background-color: #e0e0e0;
-                color: #000000;
-                border: 1px solid #cccccc;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-
-            QPushButton:hover {
-                background-color: #d0d0d0;
-            }
-
-            QPushButton:pressed {
-                background-color: #c0c0c0;
-            }
-
-            QPushButton#playButton {
-                background-color: #0078d4;
-                color: #ffffff;
-                border: none;
-                border-radius: 25px;
-                width: 50px;
-                height: 50px;
-                font-size: 16px;
-            }
-
-            QPushButton#playButton:hover {
-                background-color: #106ebe;
-            }
-
-            QSlider::groove:horizontal {
-                height: 6px;
-                background: #e0e0e0;
-                border-radius: 3px;
-            }
-
-            QSlider::handle:horizontal {
-                background: #0078d4;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-
-            QSlider::sub-page:horizontal {
-                background: #0078d4;
-                border-radius: 3px;
-            }
-
-            QLabel {
-                color: #000000;
-            }
-
-            QMenuBar {
-                background-color: #f5f5f5;
-                color: #000000;
-            }
-
-            QMenuBar::item:selected {
-                background-color: #0078d4;
-                color: #ffffff;
-            }
-
-            QMenu {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #cccccc;
-            }
-
-            QMenu::item:selected {
-                background-color: #0078d4;
-                color: #ffffff;
-            }
-
-            QStatusBar {
-                background-color: #f5f5f5;
-                color: #000000;
-            }
-        )";
-
-        // Store themes with thread safety using std::unordered_map
-        QWriteLocker locker(&m_themesLock);
-        m_themes["dark"] = std::move(darkTheme);
-        m_themes["light"] = std::move(lightTheme);
-
-    } catch (const std::exception& e) {
-        emitError(QString("Exception registering builtin themes: %1").arg(e.what()));
-    } catch (...) {
-        emitError("Unknown error registering builtin themes");
-    }
+    // Only "auto" theme is valid
+    return (themeName == "auto");
 }
 
 QString ThemeManager::loadStyleSheetFromFile(const QString& filePath) noexcept
 {
     try {
         QFile file(filePath);
-        if (!file.open(QIODevice::ReadOnly)) {
-            qWarning() << "Cannot open stylesheet file:" << filePath;
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
             return {};
         }
-
-        return QString::fromUtf8(file.readAll());
-
-    } catch (const std::exception& e) {
-        qWarning() << "Exception loading stylesheet from" << filePath << ":" << e.what();
-        return {};
+        return file.readAll();
     } catch (...) {
-        qWarning() << "Unknown error loading stylesheet from" << filePath;
         return {};
     }
 }
 
 bool ThemeManager::validateThemeData(const ThemeData& theme) noexcept
 {
-    try {
-        return !theme.name.isEmpty() &&
-               !theme.styleSheet.isEmpty() &&
-               !theme.colors.isEmpty();
-    } catch (...) {
-        return false;
-    }
+    return !theme.name.isEmpty();
 }
 
 void ThemeManager::emitError(const QString& error) const noexcept
 {
     try {
-        // Use QueuedConnection for thread-safety
-        QMetaObject::invokeMethod(const_cast<ThemeManager*>(this),
-                                  "themeError",
-                                  Qt::QueuedConnection,
-                                  Q_ARG(QString, error));
+        qWarning() << "ThemeManager Error:" << error;
+        emit const_cast<ThemeManager*>(this)->themeError(error);
     } catch (...) {
-        qWarning() << "ThemeManager error:" << error;
+        // Silent - we're in error reporting
     }
 }
 

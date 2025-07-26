@@ -155,8 +155,8 @@ void MainWindow::setupMediaControls()
 {
     // Create controls widget
     m_controlsWidget = new QWidget(this);
+    m_controlsWidget->setObjectName("controlsWidget"); // Set object name for theming
     m_controlsWidget->setFixedHeight(120);
-    m_controlsWidget->setStyleSheet("QWidget { background-color: #2b2b2b; }");
 
     // Add controls widget to main layout
     m_mainLayout->addWidget(m_controlsWidget);
@@ -169,199 +169,39 @@ void MainWindow::setupMediaControls()
     // Create progress layout
     m_progressLayout = new QHBoxLayout();
 
-    // Time labels and position slider with modern styling
+    // Time labels with object names for theming
     m_currentTimeLabel = new QLabel("00:00", this);
+    m_currentTimeLabel->setObjectName("timeLabel");
     m_currentTimeLabel->setMinimumWidth(50);
     m_currentTimeLabel->setAlignment(Qt::AlignCenter);
-    m_currentTimeLabel->setStyleSheet(R"(
-        QLabel {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            padding: 4px 8px;
-            font-weight: bold;
-            font-family: monospace;
-            font-size: 12px;
-        }
-    )");
 
-    // Create position slider with unique_ptr for safety
+    // Create position slider - remove custom styling, use theme
     m_positionSlider = std::make_unique<ClickableSlider>(Qt::Horizontal, this);
     m_positionSlider->setMinimum(0);
     m_positionSlider->setMaximum(0);
     m_positionSlider->setValue(0);
-    m_positionSlider->setStyleSheet(R"(
-        QSlider::groove:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #3a3a3a, stop:1 #2a2a2a);
-            height: 10px;
-            border-radius: 5px;
-            border: 1px solid #555555;
-        }
-        QSlider::handle:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0078d4, stop:1 #005a9e);
-            border: 3px solid #ffffff;
-            width: 24px;
-            height: 24px;
-            margin: -8px 0;
-            border-radius: 12px;
-            box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.3);
-        }
-        QSlider::handle:horizontal:hover {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #1084e0, stop:1 #0066aa);
-            transform: scale(1.2);
-            box-shadow: 0px 3px 8px rgba(0, 120, 212, 0.4);
-        }
-        QSlider::handle:horizontal:pressed {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #006cc1, stop:1 #004e8c);
-            transform: scale(1.1);
-        }
-        QSlider::sub-page:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0078d4, stop:1 #005a9e);
-            border-radius: 5px;
-            box-shadow: inset 0px 1px 3px rgba(0, 120, 212, 0.3);
-        }
-        QSlider::add-page:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #3a3a3a, stop:1 #2a2a2a);
-            border-radius: 5px;
-        }
-    )");
 
     m_totalTimeLabel = new QLabel("00:00", this);
+    m_totalTimeLabel->setObjectName("timeLabel");
     m_totalTimeLabel->setMinimumWidth(50);
     m_totalTimeLabel->setAlignment(Qt::AlignCenter);
-    m_totalTimeLabel->setStyleSheet(R"(
-        QLabel {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            padding: 4px 8px;
-            font-weight: bold;
-            font-family: monospace;
-            font-size: 12px;
-        }
-    )");
 
     // Add to progress layout
     m_progressLayout->addWidget(m_currentTimeLabel);
-    m_progressLayout->addWidget(m_positionSlider.get(), 1); // Use .get() for Qt layout
+    m_progressLayout->addWidget(m_positionSlider.get(), 1);
     m_progressLayout->addWidget(m_totalTimeLabel);
 
     // Create control buttons layout
     m_controlButtonsLayout = new QHBoxLayout();
 
-    // Create control buttons
+    // Create control buttons with object names for theming
     m_openFileButton = new QPushButton("📁 Open", this);
     m_previousButton = new QPushButton("⏮", this);
+    m_previousButton->setObjectName("mediaButton");
     m_playPauseButton = new QPushButton("▶", this);
+    m_playPauseButton->setObjectName("playPauseButton");
     m_nextButton = new QPushButton("⏭", this);
-
-    // Modern button styling with enhanced design
-    QString mediaButtonStyle = R"(
-        QPushButton {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #4a4a4a, stop:1 #2d2d2d);
-            border: 2px solid #555555;
-            border-radius: 25px;
-            color: #ffffff;
-            font-size: 18px;
-            font-weight: bold;
-            min-width: 50px;
-            min-height: 50px;
-            padding: 0px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #5a5a5a, stop:1 #3d3d3d);
-            border: 2px solid #0078d4;
-            transform: scale(1.05);
-        }
-        QPushButton:pressed {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #3a3a3a, stop:1 #1d1d1d);
-            border: 2px solid #005a9e;
-            transform: scale(0.95);
-        }
-        QPushButton:disabled {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #3a3a3a, stop:1 #1d1d1d);
-            border: 2px solid #333333;
-            color: #666666;
-        }
-    )";
-
-    // Special styling for play/pause button (larger and with accent color)
-    QString playPauseButtonStyle = R"(
-        QPushButton {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0078d4, stop:1 #005a9e);
-            border: 2px solid #0078d4;
-            border-radius: 30px;
-            color: #ffffff;
-            font-size: 22px;
-            font-weight: bold;
-            min-width: 60px;
-            min-height: 60px;
-            padding: 0px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #1084e0, stop:1 #0066aa);
-            border: 2px solid #1084e0;
-            transform: scale(1.1);
-        }
-        QPushButton:pressed {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #006cc1, stop:1 #004e8c);
-            border: 2px solid #006cc1;
-            transform: scale(0.95);
-        }
-        QPushButton:disabled {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #555555, stop:1 #333333);
-            border: 2px solid #444444;
-            color: #888888;
-        }
-    )";
-
-    // Open file button styling
-    QString openButtonStyle = R"(
-        QPushButton {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #4a4a4a, stop:1 #2d2d2d);
-            border: 2px solid #555555;
-            border-radius: 20px;
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: bold;
-            min-width: 80px;
-            min-height: 40px;
-            padding: 8px 16px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #5a5a5a, stop:1 #3d3d3d);
-            border: 2px solid #0078d4;
-        }
-        QPushButton:pressed {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #3a3a3a, stop:1 #1d1d1d);
-            border: 2px solid #005a9e;
-        }
-    )";
-
-    // Apply styles to buttons
-    m_openFileButton->setStyleSheet(openButtonStyle);
-    m_previousButton->setStyleSheet(mediaButtonStyle);
-    m_playPauseButton->setStyleSheet(playPauseButtonStyle);
-    m_nextButton->setStyleSheet(mediaButtonStyle);
+    m_nextButton->setObjectName("mediaButton");
 
     // Set fixed sizes for consistency
     m_previousButton->setFixedSize(50, 50);
@@ -369,15 +209,12 @@ void MainWindow::setupMediaControls()
     m_nextButton->setFixedSize(50, 50);
     m_openFileButton->setFixedHeight(40);
 
-    // Volume controls with modern styling
+    // Volume controls - remove custom styling, use theme
     m_volumeLabel = new QLabel("🔊", this);
     m_volumeLabel->setStyleSheet(R"(
         QLabel {
-            color: #ffffff;
             font-size: 18px;
             padding: 5px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
             min-width: 30px;
             min-height: 30px;
         }
@@ -387,38 +224,6 @@ void MainWindow::setupMediaControls()
     m_volumeSlider->setRange(0, 100);
     m_volumeSlider->setValue(70);
     m_volumeSlider->setMaximumWidth(120);
-    m_volumeSlider->setStyleSheet(R"(
-        QSlider::groove:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #3a3a3a, stop:1 #2a2a2a);
-            height: 8px;
-            border-radius: 4px;
-            border: 1px solid #555555;
-        }
-        QSlider::handle:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0078d4, stop:1 #005a9e);
-            border: 2px solid #ffffff;
-            width: 20px;
-            height: 20px;
-            margin: -8px 0;
-            border-radius: 10px;
-        }
-        QSlider::handle:horizontal:hover {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #1084e0, stop:1 #0066aa);
-            transform: scale(1.1);
-        }
-        QSlider::handle:horizontal:pressed {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #006cc1, stop:1 #004e8c);
-        }
-        QSlider::sub-page:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0078d4, stop:1 #005a9e);
-            border-radius: 4px;
-        }
-    )");
 
     // Loading progress bar
     m_loadingProgressBar = new QProgressBar(this);
@@ -605,6 +410,20 @@ void MainWindow::connectSignals()
                     QMessageBox::critical(this, "Initialization Error",
                                         "Failed to initialize application:\n" + error);
                 });
+
+        // Connect to theme manager signals
+        if (auto* themeManager = m_app->themeManager()) {
+            connect(themeManager, &Core::ThemeManager::themeChanged,
+                    this, &MainWindow::onThemeChanged);
+            connect(themeManager, &Core::ThemeManager::systemThemeChanged,
+                    this, [this](bool isDark) {
+                        QString themeType = isDark ? "dark" : "light";
+                        statusBar()->showMessage(QString("System theme changed to: %1").arg(themeType), 2000);
+                    });
+
+            // Apply theme to window frame
+            themeManager->adaptWindowFrame(this);
+        }
     }
 }
 
@@ -1103,6 +922,27 @@ void MainWindow::updateTimeLabels()
         if (m_fullScreenTotalTimeLabel) {
             m_fullScreenTotalTimeLabel->setText(totalTime);
         }
+
+        // CRITICAL FIX: Periodically sync play/pause button state to prevent desync
+        // This ensures button state is correct even if signals are missed
+        static int updateCounter = 0;
+        updateCounter++;
+        if (updateCounter % 10 == 0) { // Every 10th update (roughly every second with default 100ms timer)
+            Media::PlaybackState currentState = m_mediaController->state();
+            QString expectedButtonText = (currentState == Media::PlaybackState::Playing) ? "⏸" : "▶";
+
+            // Check main button
+            if (m_playPauseButton && m_playPauseButton->text() != expectedButtonText) {
+                m_playPauseButton->setText(expectedButtonText);
+                qDebug() << "updateTimeLabels: Fixed main button desync to:" << expectedButtonText;
+            }
+
+            // Check fullscreen button
+            if (m_fullScreenPlayPauseButton && m_fullScreenPlayPauseButton->text() != expectedButtonText) {
+                m_fullScreenPlayPauseButton->setText(expectedButtonText);
+                qDebug() << "updateTimeLabels: Fixed fullscreen button desync to:" << expectedButtonText;
+            }
+        }
     }
 }
 
@@ -1110,16 +950,23 @@ void MainWindow::updatePlayPauseButton()
 {
     if (!m_mediaController) return;
 
-    QString buttonText = (m_mediaController->state() == Media::PlaybackState::Playing) ? "⏸" : "▶";
+    // Get current state with additional validation
+    Media::PlaybackState currentState = m_mediaController->state();
+    bool isPlaying = (currentState == Media::PlaybackState::Playing);
+    QString buttonText = isPlaying ? "⏸" : "▶";
 
     // Update main window button
     if (m_playPauseButton) {
         m_playPauseButton->setText(buttonText);
+        // Add debug info for troubleshooting
+        qDebug() << "MainWindow: Updated main play/pause button to:" << buttonText
+                 << "State:" << static_cast<int>(currentState);
     }
 
     // Update fullscreen button if it exists
     if (m_fullScreenPlayPauseButton) {
         m_fullScreenPlayPauseButton->setText(buttonText);
+        qDebug() << "MainWindow: Updated fullscreen play/pause button to:" << buttonText;
     }
 }
 
@@ -1676,6 +1523,29 @@ void MainWindow::createFullScreenOverlay()
         "    font-size: 13px;"
         "    min-width: 55px;"
         "}"
+
+        // Media control buttons
+        "QPushButton#MediaButton {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 rgba(60, 60, 60, 200), "
+        "        stop:1 rgba(40, 40, 40, 180));"
+        "    border: 2px solid rgba(255, 255, 255, 100);"
+        "    border-radius: 25px;"
+        "    color: white;"
+        "    font-size: 20px;"
+        "    font-weight: bold;"
+        "}"
+        "QPushButton#MediaButton:hover {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 rgba(70, 130, 255, 220), "
+        "        stop:1 rgba(50, 100, 200, 180));"
+        "    border: 2px solid rgba(255, 255, 255, 150);"
+        "}"
+        "QPushButton#MediaButton:pressed {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 rgba(50, 90, 180, 200), "
+        "        stop:1 rgba(30, 70, 150, 160));"
+        "}"
     );
 
     // Create layout for overlay
@@ -1707,6 +1577,38 @@ void MainWindow::createFullScreenOverlay()
     m_fullScreenTotalTimeLabel = totalTimeLabel;
     m_fullScreenProgressSlider = progressSlider;
 
+    // CRITICAL: Connect fullscreen progress slider signals for seeking
+    connect(progressSlider, &QSlider::sliderPressed, [this]() {
+        m_isSeekingByUser = true;
+        if (m_controlsHideTimer) {
+            m_controlsHideTimer->stop(); // Keep controls visible while seeking
+        }
+    });
+
+    connect(progressSlider, &QSlider::sliderReleased, [this]() {
+        m_isSeekingByUser = false;
+        // Perform seek when user releases the slider
+        if (m_mediaController && m_fullScreenProgressSlider) {
+            m_mediaController->seek(m_fullScreenProgressSlider->value());
+        }
+        resetControlsHideTimer(); // Restart hide timer after seeking
+    });
+
+    // Handle clicks on the slider track for instant seeking in fullscreen
+    connect(progressSlider, &QSlider::sliderMoved, [this](int value) {
+        // Allow instant seeking when user clicks on the track in fullscreen
+        if (m_mediaController && m_isSeekingByUser) {
+            m_mediaController->seek(value);
+        }
+        resetControlsHideTimer(); // Keep controls visible during interaction
+    });
+
+    // Sync fullscreen slider range with main slider when available
+    if (m_positionSlider) {
+        progressSlider->setRange(m_positionSlider->minimum(), m_positionSlider->maximum());
+        progressSlider->setValue(m_positionSlider->value());
+    }
+
     progressLayout->addWidget(currentTimeLabel);
     progressLayout->addWidget(progressSlider, 1);
     progressLayout->addWidget(totalTimeLabel);
@@ -1715,10 +1617,69 @@ void MainWindow::createFullScreenOverlay()
     auto* buttonsLayout = new QHBoxLayout();
     buttonsLayout->setSpacing(15);
 
-    // Play/pause button
+    // Previous track button
+    auto* previousBtn = new QPushButton("⏮", m_fullScreenControlsOverlay);
+    previousBtn->setObjectName("MediaButton");
+    previousBtn->setFixedSize(50, 50);
+    previousBtn->setStyleSheet(R"(
+        QPushButton#MediaButton {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(60, 60, 60, 200),
+                stop:1 rgba(40, 40, 40, 180));
+            border: 2px solid rgba(255, 255, 255, 100);
+            border-radius: 25px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        QPushButton#MediaButton:hover {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(70, 130, 255, 220),
+                stop:1 rgba(50, 100, 200, 180));
+            border: 2px solid rgba(255, 255, 255, 150);
+        }
+        QPushButton#MediaButton:pressed {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(50, 90, 180, 200),
+                stop:1 rgba(30, 70, 150, 160));
+        }
+    )");
+
+    connect(previousBtn, &QPushButton::clicked, [this]() {
+        previousTrack();
+        resetControlsHideTimer();
+    });
+
+    // Play/pause button with enhanced styling
     auto* playPauseBtn = new QPushButton("▶", m_fullScreenControlsOverlay);
     playPauseBtn->setObjectName("PlayPauseButton");
-    playPauseBtn->setFixedSize(60, 60);
+    playPauseBtn->setFixedSize(70, 70); // Slightly larger than media buttons
+    playPauseBtn->setStyleSheet(R"(
+        QPushButton#PlayPauseButton {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(70, 130, 255, 240),
+                stop:1 rgba(50, 100, 200, 200));
+            border: 3px solid rgba(255, 255, 255, 150);
+            border-radius: 35px;
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        QPushButton#PlayPauseButton:hover {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(90, 150, 255, 250),
+                stop:1 rgba(70, 120, 220, 210));
+            border: 4px solid rgba(255, 255, 255, 220);
+            font-size: 30px;
+        }
+        QPushButton#PlayPauseButton:pressed {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(50, 90, 180, 220),
+                stop:1 rgba(30, 70, 150, 180));
+            border: 2px solid rgba(255, 255, 255, 150);
+            font-size: 26px;
+        }
+    )");
 
     connect(playPauseBtn, &QPushButton::clicked, [this]() {
         togglePlayPause();
@@ -1727,9 +1688,123 @@ void MainWindow::createFullScreenOverlay()
 
     m_fullScreenPlayPauseButton = playPauseBtn;
 
-    buttonsLayout->addStretch();
+    // CRITICAL FIX: Sync fullscreen button with current playback state immediately
+    if (m_mediaController) {
+        Media::PlaybackState currentState = m_mediaController->state();
+        QString buttonText = (currentState == Media::PlaybackState::Playing) ? "⏸" : "▶";
+        playPauseBtn->setText(buttonText);
+        qDebug() << "createFullScreenOverlay: Synced fullscreen button with current state:"
+                 << buttonText << "State:" << static_cast<int>(currentState);
+    }
+
+    // Next track button
+    auto* nextBtn = new QPushButton("⏭", m_fullScreenControlsOverlay);
+    nextBtn->setObjectName("MediaButton");
+    nextBtn->setFixedSize(50, 50);
+    nextBtn->setStyleSheet(R"(
+        QPushButton#MediaButton {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(60, 60, 60, 200),
+                stop:1 rgba(40, 40, 40, 180));
+            border: 2px solid rgba(255, 255, 255, 100);
+            border-radius: 25px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        QPushButton#MediaButton:hover {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(70, 130, 255, 220),
+                stop:1 rgba(50, 100, 200, 180));
+            border: 2px solid rgba(255, 255, 255, 150);
+        }
+        QPushButton#MediaButton:pressed {
+            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
+                stop:0 rgba(50, 90, 180, 200),
+                stop:1 rgba(30, 70, 150, 160));
+        }
+    )");
+
+    connect(nextBtn, &QPushButton::clicked, [this]() {
+        nextTrack();
+        resetControlsHideTimer();
+    });
+
+    // Store references to the new buttons
+    m_fullScreenPreviousButton = previousBtn;
+    m_fullScreenNextButton = nextBtn;
+
+    // Add volume control to fullscreen overlay
+    auto* volumeLabel = new QLabel("🔊", m_fullScreenControlsOverlay);
+    volumeLabel->setStyleSheet(R"(
+        QLabel {
+            font-size: 18px;
+            color: white;
+            padding: 8px;
+            min-width: 30px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 100);
+        }
+    )");
+
+    auto* volumeSlider = new QSlider(Qt::Horizontal, m_fullScreenControlsOverlay);
+    volumeSlider->setObjectName("VolumeSlider");
+    volumeSlider->setRange(0, 100);
+    volumeSlider->setMaximumWidth(120);
+    volumeSlider->setStyleSheet(R"(
+        QSlider#VolumeSlider::groove:horizontal {
+            background: rgba(255, 255, 255, 80);
+            height: 4px;
+            border-radius: 2px;
+        }
+        QSlider#VolumeSlider::handle:horizontal {
+            background: rgba(255, 255, 255, 255);
+            width: 14px;
+            height: 14px;
+            border-radius: 7px;
+            border: 1px solid rgba(70, 130, 255, 200);
+            margin: -6px 0;
+        }
+        QSlider#VolumeSlider::handle:horizontal:hover {
+            background: rgba(70, 130, 255, 255);
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            margin: -7px 0;
+        }
+        QSlider#VolumeSlider::sub-page:horizontal {
+            background: rgba(70, 130, 255, 200);
+            border-radius: 2px;
+        }
+    )");
+
+    // Sync with main volume slider
+    if (m_volumeSlider) {
+        volumeSlider->setValue(m_volumeSlider->value());
+    }
+
+    // Connect volume slider
+    connect(volumeSlider, &QSlider::valueChanged, [this](int value) {
+        onVolumeChanged(value);
+        // Also update main volume slider to keep them in sync
+        if (m_volumeSlider) {
+            m_volumeSlider->blockSignals(true);
+            m_volumeSlider->setValue(value);
+            m_volumeSlider->blockSignals(false);
+        }
+        resetControlsHideTimer();
+    });
+
+    m_fullScreenVolumeSlider = volumeSlider;
+
+    // Layout the buttons: Media controls in center, volume controls on right
+    buttonsLayout->addStretch(1); // Left stretch for centering
+    buttonsLayout->addWidget(previousBtn);
     buttonsLayout->addWidget(playPauseBtn);
-    buttonsLayout->addStretch();
+    buttonsLayout->addWidget(nextBtn);
+    buttonsLayout->addStretch(1); // Right stretch for centering
+    buttonsLayout->addWidget(volumeLabel);
+    buttonsLayout->addWidget(volumeSlider);
 
     // Assemble final overlay layout
     overlayLayout->addLayout(progressLayout);

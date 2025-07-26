@@ -172,6 +172,8 @@ private:
     QPointer<QLabel> m_fullScreenCurrentTimeLabel;
     QPointer<QLabel> m_fullScreenTotalTimeLabel;
     QPointer<QPushButton> m_fullScreenPlayPauseButton;
+    QPointer<QPushButton> m_fullScreenPreviousButton;
+    QPointer<QPushButton> m_fullScreenNextButton;
     QPointer<ClickableSlider> m_fullScreenProgressSlider;
     QPointer<QSlider> m_fullScreenVolumeSlider;
 
