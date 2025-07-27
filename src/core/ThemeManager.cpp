@@ -71,13 +71,15 @@ bool ThemeManager::loadAutoTheme() noexcept
         // Set basic theme colors
         QJsonObject colors;
         if (isDark) {
-            colors["background"] = "#2b2b2b";
+            // Black-red color scheme for dark theme
+            colors["background"] = "#1a1a1a";
             colors["foreground"] = "#ffffff";
-            colors["accent"] = "#4dabf7";
+            colors["accent"] = "#e74c3c";
         } else {
+            // White-red color scheme for light theme
             colors["background"] = "#ffffff";
             colors["foreground"] = "#000000";
-            colors["accent"] = "#0066cc";
+            colors["accent"] = "#dc3545";
         }
         themeData->colors = colors;
 
@@ -252,29 +254,46 @@ void ThemeManager::detectSystemTheme() noexcept
 
 QPalette ThemeManager::createLightPalette() const noexcept
 {
-    // Use system palette with minimal customization
+    // Use system palette as base
     QPalette palette = QApplication::palette();
     
-    // Only set essential colors for light theme consistency
-    palette.setColor(QPalette::Highlight, QColor("#0066cc"));
+    // White-red color scheme for light theme
+    palette.setColor(QPalette::Window, QColor("#ffffff"));
+    palette.setColor(QPalette::WindowText, QColor("#000000"));
+    palette.setColor(QPalette::Base, QColor("#f8f8f8"));
+    palette.setColor(QPalette::AlternateBase, QColor("#f0f0f0"));
+    palette.setColor(QPalette::Text, QColor("#000000"));
+    palette.setColor(QPalette::Button, QColor("#ffffff"));
+    palette.setColor(QPalette::ButtonText, QColor("#000000"));
+
+    // Red accents for light theme
+    palette.setColor(QPalette::Highlight, QColor("#dc3545"));        // Red
     palette.setColor(QPalette::HighlightedText, QColor("#ffffff"));
-    palette.setColor(QPalette::Link, QColor("#0066cc"));
-    palette.setColor(QPalette::LinkVisited, QColor("#004499"));
+    palette.setColor(QPalette::Link, QColor("#dc3545"));             // Red
+    palette.setColor(QPalette::LinkVisited, QColor("#a71e2a"));      // Darker red
 
     return palette;
 }
 
 QPalette ThemeManager::createDarkPalette() const noexcept
 {
-    // Use system palette with minimal customization  
+    // Use system palette as base
     QPalette palette = QApplication::palette();
     
-    // Only set essential colors for dark theme consistency
-    palette.setColor(QPalette::Highlight, QColor("#4dabf7"));
-    palette.setColor(QPalette::HighlightedText, QColor("#000000"));
-    palette.setColor(QPalette::Link, QColor("#4dabf7"));
-    palette.setColor(QPalette::LinkVisited, QColor("#339af0"));
+    // Black-red color scheme for dark theme
+    palette.setColor(QPalette::Window, QColor("#1a1a1a"));           // Near black
+    palette.setColor(QPalette::WindowText, QColor("#ffffff"));
+    palette.setColor(QPalette::Base, QColor("#2d2d2d"));             // Dark gray
+    palette.setColor(QPalette::AlternateBase, QColor("#3d3d3d"));    // Lighter dark gray
+    palette.setColor(QPalette::Text, QColor("#ffffff"));
+    palette.setColor(QPalette::Button, QColor("#2d2d2d"));
+    palette.setColor(QPalette::ButtonText, QColor("#ffffff"));
 
+    // Red accents for dark theme
+    palette.setColor(QPalette::Highlight, QColor("#e74c3c"));        // Bright red
+    palette.setColor(QPalette::HighlightedText, QColor("#ffffff"));
+    palette.setColor(QPalette::Link, QColor("#e74c3c"));             // Bright red
+    palette.setColor(QPalette::LinkVisited, QColor("#c0392b"));      // Darker red
 
     return palette;
 }

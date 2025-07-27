@@ -118,6 +118,8 @@ private:
     void hideFullScreenUI();
     [[nodiscard]] static QString formatTime(qint64 milliseconds);
 
+    // Theme-aware styling for fullscreen mode
+    [[nodiscard]] QString generateFullScreenStyleSheet() const;
 
 private:
     // Core application reference

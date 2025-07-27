@@ -1510,79 +1510,7 @@ void MainWindow::createFullScreenOverlay()
     m_fullScreenControlsOverlay->setFocusPolicy(Qt::NoFocus);
 
     // Enhanced styling with modern media player design
-    m_fullScreenControlsOverlay->setStyleSheet(
-        // Main overlay container
-        "QWidget#FullScreenOverlay {"
-        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        "        stop:0 rgba(18, 18, 22, 245), "
-        "        stop:1 rgba(12, 12, 16, 235));"
-        "    border: 2px solid rgba(255, 255, 255, 60);"
-        "    border-radius: 16px;"
-        "}"
-
-        // Play/Pause button
-        "QPushButton#PlayPauseButton {"
-        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
-        "        stop:0 rgba(70, 130, 255, 220), "
-        "        stop:1 rgba(50, 100, 200, 180));"
-        "    border: 3px solid rgba(255, 255, 255, 120);"
-        "    border-radius: 30px;"
-        "    color: white;"
-        "    font-size: 24px;"
-        "    min-width: 60px;"
-        "    min-height: 60px;"
-        "}"
-
-        // Progress slider
-        "QSlider#ProgressSlider::groove:horizontal {"
-        "    background: rgba(255, 255, 255, 100);"
-        "    height: 6px;"
-        "    border-radius: 3px;"
-        "}"
-        "QSlider#ProgressSlider::handle:horizontal {"
-        "    background: rgba(255, 255, 255, 255);"
-        "    width: 16px;"
-        "    height: 16px;"
-        "    border-radius: 8px;"
-        "    border: 2px solid rgba(70, 130, 255, 200);"
-        "    margin: -7px 0;"
-        "}"
-
-        // Time labels
-        "QLabel#TimeLabel {"
-        "    background: rgba(0, 0, 0, 150);"
-        "    border: 1px solid rgba(255, 255, 255, 60);"
-        "    border-radius: 8px;"
-        "    padding: 6px 12px;"
-        "    color: white;"
-        "    font-family: monospace;"
-        "    font-size: 13px;"
-        "    min-width: 55px;"
-        "}"
-
-        // Media control buttons
-        "QPushButton#MediaButton {"
-        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
-        "        stop:0 rgba(60, 60, 60, 200), "
-        "        stop:1 rgba(40, 40, 40, 180));"
-        "    border: 2px solid rgba(255, 255, 255, 100);"
-        "    border-radius: 25px;"
-        "    color: white;"
-        "    font-size: 20px;"
-        "    font-weight: bold;"
-        "}"
-        "QPushButton#MediaButton:hover {"
-        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
-        "        stop:0 rgba(70, 130, 255, 220), "
-        "        stop:1 rgba(50, 100, 200, 180));"
-        "    border: 2px solid rgba(255, 255, 255, 150);"
-        "}"
-        "QPushButton#MediaButton:pressed {"
-        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
-        "        stop:0 rgba(50, 90, 180, 200), "
-        "        stop:1 rgba(30, 70, 150, 160));"
-        "}"
-    );
+    m_fullScreenControlsOverlay->setStyleSheet(generateFullScreenStyleSheet());
 
     // Create layout for overlay
     auto* overlayLayout = new QVBoxLayout(m_fullScreenControlsOverlay);
@@ -1669,29 +1597,6 @@ void MainWindow::createFullScreenOverlay()
     auto* previousBtn = new QPushButton("⏮", m_fullScreenControlsOverlay);
     previousBtn->setObjectName("MediaButton");
     previousBtn->setFixedSize(50, 50);
-    previousBtn->setStyleSheet(R"(
-        QPushButton#MediaButton {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(60, 60, 60, 200),
-                stop:1 rgba(40, 40, 40, 180));
-            border: 2px solid rgba(255, 255, 255, 100);
-            border-radius: 25px;
-            color: white;
-            font-size: 20px;
-            font-weight: bold;
-        }
-        QPushButton#MediaButton:hover {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(70, 130, 255, 220),
-                stop:1 rgba(50, 100, 200, 180));
-            border: 2px solid rgba(255, 255, 255, 150);
-        }
-        QPushButton#MediaButton:pressed {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(50, 90, 180, 200),
-                stop:1 rgba(30, 70, 150, 160));
-        }
-    )");
 
     connect(previousBtn, &QPushButton::clicked, [this]() {
         previousTrack();
@@ -1702,32 +1607,6 @@ void MainWindow::createFullScreenOverlay()
     auto* playPauseBtn = new QPushButton("▶", m_fullScreenControlsOverlay);
     playPauseBtn->setObjectName("PlayPauseButton");
     playPauseBtn->setFixedSize(70, 70); // Slightly larger than media buttons
-    playPauseBtn->setStyleSheet(R"(
-        QPushButton#PlayPauseButton {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(70, 130, 255, 240),
-                stop:1 rgba(50, 100, 200, 200));
-            border: 3px solid rgba(255, 255, 255, 150);
-            border-radius: 35px;
-            color: white;
-            font-size: 28px;
-            font-weight: bold;
-        }
-        QPushButton#PlayPauseButton:hover {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(90, 150, 255, 250),
-                stop:1 rgba(70, 120, 220, 210));
-            border: 4px solid rgba(255, 255, 255, 220);
-            font-size: 30px;
-        }
-        QPushButton#PlayPauseButton:pressed {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(50, 90, 180, 220),
-                stop:1 rgba(30, 70, 150, 180));
-            border: 2px solid rgba(255, 255, 255, 150);
-            font-size: 26px;
-        }
-    )");
 
     connect(playPauseBtn, &QPushButton::clicked, [this]() {
         // Always use the main togglePlayPause method to ensure consistent behavior
@@ -1750,38 +1629,11 @@ void MainWindow::createFullScreenOverlay()
     auto* nextBtn = new QPushButton("⏭", m_fullScreenControlsOverlay);
     nextBtn->setObjectName("MediaButton");
     nextBtn->setFixedSize(50, 50);
-    nextBtn->setStyleSheet(R"(
-        QPushButton#MediaButton {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(60, 60, 60, 200),
-                stop:1 rgba(40, 40, 40, 180));
-            border: 2px solid rgba(255, 255, 255, 100);
-            border-radius: 25px;
-            color: white;
-            font-size: 20px;
-            font-weight: bold;
-        }
-        QPushButton#MediaButton:hover {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(70, 130, 255, 220),
-                stop:1 rgba(50, 100, 200, 180));
-            border: 2px solid rgba(255, 255, 255, 150);
-        }
-        QPushButton#MediaButton:pressed {
-            background: qradialGradient(cx:0.5, cy:0.5, radius:0.8,
-                stop:0 rgba(50, 90, 180, 200),
-                stop:1 rgba(30, 70, 150, 160));
-        }
-    )");
 
     connect(nextBtn, &QPushButton::clicked, [this]() {
         nextTrack();
         resetControlsHideTimer();
     });
-
-    // Store references to the new buttons
-    m_fullScreenPreviousButton = previousBtn;
-    m_fullScreenNextButton = nextBtn;
 
     // Add volume control to fullscreen overlay
     auto* volumeLabel = new QLabel("🔊", m_fullScreenControlsOverlay);
@@ -1800,32 +1652,6 @@ void MainWindow::createFullScreenOverlay()
     volumeSlider->setObjectName("VolumeSlider");
     volumeSlider->setRange(0, 100);
     volumeSlider->setMaximumWidth(120);
-    volumeSlider->setStyleSheet(R"(
-        QSlider#VolumeSlider::groove:horizontal {
-            background: rgba(255, 255, 255, 80);
-            height: 4px;
-            border-radius: 2px;
-        }
-        QSlider#VolumeSlider::handle:horizontal {
-            background: rgba(255, 255, 255, 255);
-            width: 14px;
-            height: 14px;
-            border-radius: 7px;
-            border: 1px solid rgba(70, 130, 255, 200);
-            margin: -6px 0;
-        }
-        QSlider#VolumeSlider::handle:horizontal:hover {
-            background: rgba(70, 130, 255, 255);
-            width: 16px;
-            height: 16px;
-            border-radius: 8px;
-            margin: -7px 0;
-        }
-        QSlider#VolumeSlider::sub-page:horizontal {
-            background: rgba(70, 130, 255, 200);
-            border-radius: 2px;
-        }
-    )");
 
     // Sync with main volume slider
     if (m_volumeSlider) {
@@ -1937,7 +1763,7 @@ void MainWindow::hideFullScreenUI()
 
 void MainWindow::updateOverlayPosition()
 {
-    if (!m_fullScreenControlsOverlay || !m_isFullScreen) {
+    if (!m_fullScreenControlsOverlay || ! m_isFullScreen) {
         return;
     }
 
@@ -2211,6 +2037,173 @@ void MainWindow::showContextMenu(const QPoint& position)
     }
 
     contextMenu.exec(position);
+}
+
+QString MainWindow::generateFullScreenStyleSheet() const
+{
+    // Determine if we're using dark theme
+    bool isDarkTheme = false;
+    if (m_app && m_app->themeManager()) {
+        isDarkTheme = m_app->themeManager()->isSystemDarkTheme();
+    }
+
+    // Define colors based on theme
+    QString overlayBg1, overlayBg2, borderColor, accentColor, accentHover, accentPressed;
+    QString buttonBg1, buttonBg2, buttonHoverBg1, buttonHoverBg2, buttonPressedBg1, buttonPressedBg2;
+    QString textColor, timeLabelBg, progressGroove, progressHandle;
+
+    if (isDarkTheme) {
+        // Black-red color scheme for dark theme
+        overlayBg1 = "rgba(26, 26, 26, 245)";      // Near black
+        overlayBg2 = "rgba(18, 18, 18, 235)";      // Darker black
+        borderColor = "rgba(231, 76, 60, 80)";      // Red border
+        accentColor = "rgba(231, 76, 60, 220)";     // Bright red
+        accentHover = "rgba(192, 57, 43, 200)";     // Darker red hover
+        accentPressed = "rgba(169, 50, 38, 180)";   // Even darker red pressed
+
+        buttonBg1 = "rgba(45, 45, 45, 200)";        // Dark gray
+        buttonBg2 = "rgba(35, 35, 35, 180)";        // Darker gray
+        buttonHoverBg1 = "rgba(231, 76, 60, 180)";  // Red hover
+        buttonHoverBg2 = "rgba(192, 57, 43, 160)";  // Darker red hover
+        buttonPressedBg1 = "rgba(169, 50, 38, 160)"; // Pressed red
+        buttonPressedBg2 = "rgba(148, 44, 33, 140)"; // Darker pressed red
+
+        textColor = "white";
+        timeLabelBg = "rgba(18, 18, 18, 150)";
+        progressGroove = "rgba(255, 255, 255, 100)";
+        progressHandle = "rgba(231, 76, 60, 255)";   // Red handle
+    } else {
+        // White-red color scheme for light theme
+        overlayBg1 = "rgba(255, 255, 255, 245)";    // White
+        overlayBg2 = "rgba(248, 248, 248, 235)";    // Light gray
+        borderColor = "rgba(220, 53, 69, 80)";      // Red border
+        accentColor = "rgba(220, 53, 69, 220)";     // Red
+        accentHover = "rgba(167, 30, 42, 200)";     // Darker red hover
+        accentPressed = "rgba(143, 26, 36, 180)";   // Even darker red pressed
+
+        buttonBg1 = "rgba(248, 248, 248, 200)";     // Light gray
+        buttonBg2 = "rgba(240, 240, 240, 180)";     // Lighter gray
+        buttonHoverBg1 = "rgba(220, 53, 69, 180)";  // Red hover
+        buttonHoverBg2 = "rgba(167, 30, 42, 160)";  // Darker red hover
+        buttonPressedBg1 = "rgba(143, 26, 36, 160)"; // Pressed red
+        buttonPressedBg2 = "rgba(128, 23, 32, 140)"; // Darker pressed red
+
+        textColor = "black";
+        timeLabelBg = "rgba(255, 255, 255, 150)";
+        progressGroove = "rgba(0, 0, 0, 100)";
+        progressHandle = "rgba(220, 53, 69, 255)";   // Red handle
+    }
+
+    return QString(
+        // Main overlay container
+        "QWidget#FullScreenOverlay {"
+        "    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        "        stop:0 %1, stop:1 %2);"
+        "    border: 2px solid %3;"
+        "    border-radius: 16px;"
+        "}"
+
+        // Play/Pause button
+        "QPushButton#PlayPauseButton {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 %4, stop:1 %5);"
+        "    border: 3px solid rgba(255, 255, 255, 120);"
+        "    border-radius: 30px;"
+        "    color: %6;"
+        "    font-size: 24px;"
+        "    min-width: 60px;"
+        "    min-height: 60px;"
+        "}"
+        "QPushButton#PlayPauseButton:hover {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 %7, stop:1 %8);"
+        "}"
+        "QPushButton#PlayPauseButton:pressed {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 %9, stop:1 %10);"
+        "}"
+
+        // Progress slider
+        "QSlider#ProgressSlider::groove:horizontal {"
+        "    background: %11;"
+        "    height: 6px;"
+        "    border-radius: 3px;"
+        "}"
+        "QSlider#ProgressSlider::handle:horizontal {"
+        "    background: %12;"
+        "    width: 16px;"
+        "    height: 16px;"
+        "    border-radius: 8px;"
+        "    border: 2px solid %3;"
+        "    margin: -7px 0;"
+        "}"
+        "QSlider#ProgressSlider::sub-page:horizontal {"
+        "    background: %4;"
+        "    border-radius: 3px;"
+        "}"
+
+        // Time labels
+        "QLabel#TimeLabel {"
+        "    background: %13;"
+        "    border: 1px solid %3;"
+        "    border-radius: 8px;"
+        "    padding: 6px 12px;"
+        "    color: %6;"
+        "    font-family: monospace;"
+        "    font-size: 13px;"
+        "    min-width: 55px;"
+        "}"
+
+        // Media control buttons
+        "QPushButton#MediaButton {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 %14, stop:1 %15);"
+        "    border: 2px solid rgba(255, 255, 255, 100);"
+        "    border-radius: 25px;"
+        "    color: %6;"
+        "    font-size: 20px;"
+        "    font-weight: bold;"
+        "}"
+        "QPushButton#MediaButton:hover {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 %16, stop:1 %17);"
+        "    border: 2px solid rgba(255, 255, 255, 150);"
+        "}"
+        "QPushButton#MediaButton:pressed {"
+        "    background: qradialGradient(cx:0.5, cy:0.5, radius:0.8, "
+        "        stop:0 %18, stop:1 %19);"
+        "}"
+
+        // Volume slider
+        "QSlider#VolumeSlider::groove:horizontal {"
+        "    background: %11;"
+        "    height: 4px;"
+        "    border-radius: 2px;"
+        "}"
+        "QSlider#VolumeSlider::handle:horizontal {"
+        "    background: rgba(255, 255, 255, 255);"
+        "    width: 14px;"
+        "    height: 14px;"
+        "    border-radius: 7px;"
+        "    border: 1px solid %4;"
+        "    margin: -6px 0;"
+        "}"
+        "QSlider#VolumeSlider::handle:horizontal:hover {"
+        "    background: %4;"
+        "    width: 16px;"
+        "    height: 16px;"
+        "    border-radius: 8px;"
+        "    margin: -7px 0;"
+        "}"
+        "QSlider#VolumeSlider::sub-page:horizontal {"
+        "    background: %4;"
+        "    border-radius: 2px;"
+        "}"
+    ).arg(overlayBg1, overlayBg2, borderColor, accentColor, accentHover,        // 1-5
+          textColor, buttonHoverBg1, buttonHoverBg2, buttonPressedBg1,         // 6-9
+          buttonPressedBg2, progressGroove, progressHandle, timeLabelBg,       // 10-13
+          buttonBg1, buttonBg2, buttonHoverBg1, buttonHoverBg2,               // 14-17
+          buttonPressedBg1, buttonPressedBg2);                                // 18-19
 }
 
 } // namespace DarkPlay::UI
