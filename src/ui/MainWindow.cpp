@@ -1385,13 +1385,13 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
             }
         } else if (event->button() == Qt::RightButton) {
             // Show context menu on right click in fullscreen
-            showContextMenu(event->globalPos());
+            showContextMenu(event->globalPosition().toPoint());
             return;
         }
     } else {
         // Handle right click in normal mode
         if (event->button() == Qt::RightButton) {
-            showContextMenu(event->globalPos());
+            showContextMenu(event->globalPosition().toPoint());
             return;
         }
     }
