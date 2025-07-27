@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="DarkPlay Logo" width="128" height="128">
+  <img src="logo.png" alt="DarkPlay Logo" width="256" height="256">
   
   # DarkPlay Media Player
   
