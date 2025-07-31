@@ -44,6 +44,7 @@ set(CONTROLLERS_SOURCES
 set(UI_SOURCES
     src/ui/MainWindow.cpp
     src/ui/ClickableSlider.cpp
+        src/ui/SettingDialog.cpp
 )
 
 set(UTILS_SOURCES
@@ -63,6 +64,7 @@ set(HEADERS
     include/ui/MainWindow.h
     include/ui/ClickableSlider.h
     include/plugins/IPlugin.h
+        include/ui/SettingDialog.h
 )
 
 # All sources

@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
             return -1;
         }
 
-        // Create main window with exception safety
+        // Create the main window with exception safety
         std::unique_ptr<DarkPlay::UI::MainWindow> window;
         try {
             window = std::make_unique<DarkPlay::UI::MainWindow>();
