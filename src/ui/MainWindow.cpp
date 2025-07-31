@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 #include "ui/ClickableSlider.h"
+#include "ui/SettingDialog.h"
 #include "controllers/MediaController.h"
 #include "core/Application.h"
 #include "core/ConfigManager.h"
@@ -1806,11 +1807,64 @@ void MainWindow::resetControlsHideTimer()
     }
 }
 
+void MainWindow::showSettings()
+{
+    try {
+        // Create settings dialog with proper parent
+        auto* settingsDialog = new SettingDialog(this);
+        if (!settingsDialog) {
+            qCritical() << "Failed to create SettingDialog";
+            statusBar()->showMessage("Error: Could not open settings dialog", 3000);
+            return;
+        }
+
+        // Configure dialog
+        settingsDialog->setAttribute(Qt::WA_DeleteOnClose); // Auto-delete when closed
+        settingsDialog->setWindowTitle("DarkPlay Settings");
+
+        // Center dialog on parent window
+        settingsDialog->resize(600, 400);
+        if (this->isVisible()) {
+            QRect parentGeometry = this->geometry();
+            QRect dialogGeometry = settingsDialog->geometry();
+            settingsDialog->move(
+                parentGeometry.center() - dialogGeometry.center()
+            );
+        }
+
+        qDebug() << "Opening settings dialog";
+
+        // Show as modal dialog and handle result
+        int result = settingsDialog->exec();
+
+        if (result == QDialog::Accepted) {
+            // Settings were applied and saved
+            qDebug() << "Settings dialog accepted - changes saved";
+            statusBar()->showMessage("Settings saved successfully", 2000);
+
+            // Optionally refresh UI elements that might be affected by settings changes
+            // This could include theme updates, language changes, etc.
+            emit settingsChanged(); // Emit signal for other components to react
+
+        } else if (result == QDialog::Rejected) {
+            qDebug() << "Settings dialog cancelled";
+            statusBar()->showMessage("Settings changes cancelled", 1500);
+        }
+
+    } catch (const std::exception& e) {
+        qCritical() << "Exception in showSettings():" << e.what();
+        statusBar()->showMessage("Error: Failed to open settings dialog", 3000);
+
+    } catch (...) {
+        qCritical() << "Unknown exception in showSettings()";
+        statusBar()->showMessage("Error: Unexpected error in settings dialog", 3000);
+    }
+}
+
 void MainWindow::showPreferences()
 {
-    QMessageBox::information(this, "Preferences",
-                           "Preferences dialog will be implemented in a future version.\n\n"
-                           "For now, you can change themes from the View menu.");
+    // Delegate to the main settings dialog
+    showSettings();
 }
 
 void MainWindow::showPluginManager()

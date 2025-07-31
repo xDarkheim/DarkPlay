@@ -24,7 +24,10 @@
 namespace DarkPlay {
 namespace Core { class Application; }
 namespace Controllers { class MediaController; }
-namespace UI { class ClickableSlider; }
+namespace UI {
+    class ClickableSlider;
+    class SettingDialog;
+}
 }
 
 namespace DarkPlay::UI {
@@ -78,6 +81,7 @@ private slots:
     void updateTimeLabels();
 
     // Settings and dialogs
+    void showSettings();
     void showPreferences();
     void showPluginManager();
 
@@ -86,6 +90,10 @@ private slots:
 
     // Context menu
     void showContextMenu(const QPoint& position);
+
+signals:
+    // Emitted when settings have been changed and applied
+    void settingsChanged();
 
 private:
     // UI setup methods
